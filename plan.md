@@ -79,26 +79,25 @@ Optional user input prompt (shown pre- or mid-analysis):
 
 - "Tell us about the water" — free text and quick selectors for smell/scent, color, feel, temperature.
 - This input refines turbidity/temperature inference and final explanation.
+- This input is in a form of a text box. Free form, for the user to tell the details of the water in their own languages and words
 
 ## Technical Context
 
 **Language/Version**: Python 3.x only (unified)
-**Primary Dependencies**: FastAPI (API), Gradio (Web UI), SQLAlchemy/SQLite, Pydantic v2, httpx.
 **ML Libraries**:
 
 - Scene classification: External pretrained Places365 CNNs (ResNet family)
   - ResNet152 (Caffe) deploy prototxt: https://github.com/CSAILVision/places365/blob/master/deploy_resnet152_places365.prototxt
   - ResNet152 weights (Caffe): http://places2.csail.mit.edu/models_places365/resnet152_places365.caffemodel
-  - Alternative PyTorch checkpoints: ResNet18/ResNet50/DenseNet161 `.pth.tar` from Places365 models page
 - Object detection (baseline): RF-DETR (https://github.com/roboflow/rf-detr, Apache-2.0)
 - Object detection (compatibility path): Ultralytics YOLO11 (often referred to as YOLOv11) via `ultralytics` package (AGPL-3.0 / Enterprise)
   - Docs: https://docs.ultralytics.com/models/yolo11/
   - Repo: https://github.com/ultralytics/ultralytics (AGPL-3.0)
-- Object detection (in-house training option): YOLOv12 (https://github.com/sunsmarterjie/yolov12, AGPL-3.0)
+- Object detection and Classification (in-house training option): YOLOv12 (https://github.com/sunsmarterjie/yolov12, AGPL-3.0)
+- Notes: YoloV11 is used as a compatibility backup for the in house model as yolov12 is not ready. It will provide testsing meanwhile. While V12 gets developed.
   **Model Management**:
 - Auto-download Places365 model assets from the above URLs during ML bootstrap (opt-out via env) with checksum verification and caching
 - Prefer native PyTorch for inference when available; convert/bridge Caffe models as needed (export to ONNX or use a Caffe runtime bridge if required)
-  **Storage**: SQLite (for ease of local run); consider local-first history with optional sync later
   **Testing**: Pytest
   **Target Platform**: Web browser (desktop + mobile web)
   **Project Type**: web (Python-only API + Python Gradio UI)
