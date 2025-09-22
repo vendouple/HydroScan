@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HydroScan</title>
+    <link rel="stylesheet" href="/static/css/main.css" />
+  </head>
+  <body>
+    <header>
+      <h1>HydroScan</h1>
+      <p class="subtitle">
+        Analyze water images/videos for potability and confidence
+      </p>
+    </header>
+
+    <main>
+      <section class="card">
+        <form id="analyze-form">
+          <label
+            >Media (images/videos):
+            <input type="file" id="files" name="files" multiple />
+          </label>
+          <label
+            >Description:
+            <textarea
+              id="description"
+              name="description"
+              rows="3"
+              placeholder="Smell, color, feel, temperature..."></textarea>
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" id="debug" name="debug" /> Debug
+          </label>
+          <div class="actions">
+            <button type="submit">Analyze</button>
+            <button type="reset">Clear</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card" id="status-card">
+        <h2>Status</h2>
+        <pre id="status">Idle</pre>
+      </section>
+    </main>
+
+    <script src="/static/js/ui.js"></script>
+  </body>
+</html>
