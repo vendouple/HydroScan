@@ -315,15 +315,15 @@ Notes:
 
 # 8. Auto-download & boot sequence
 
-**scripts/fetch_models.py** must:
+**WebInterface/backend/Utils/fetch_models.py** must:
 
 - Download Places365 prototxt + caffemodel (exact links in §1).
 - Optionally download RF-DETR, yolo11n, yolov12 weights if configured.
 - Verify checksums (SHA256) and fail gracefully (UI shows degraded mode) if network unavailable.
 
-**Boot order (main.py)**:
+**Boot order (app.py)**:
 
-1. run `scripts/fetch_models.py` (skip if models exist & checksum ok)
+1. run `WebInterface/backend/Utils/fetch_models.py` (skip if models exist & checksum ok)
 2. initialize adapters (Place365, RFDETR, InModel)
 3. start FastAPI server and static file server
 4. expose `/api/models/status` for frontend health check
@@ -429,35 +429,29 @@ Implement the above in `backend/Adapters/RFDETR.py` and return the standardized 
 
 ---
 
-# 14. Example mini `main.py` (concept)
+# 14. Example mini `app.py` (concept)
 
 ```py
-# WebInterface/main.py
+# WebInterface/app.py
 import os
-import scripts.fetch_models as fetcher
 from fastapi import FastAPI
-import uvicorn
+from WebInterface.backend.Utils.fetch_models import ensure_models
 
 # 1) ensure models
-fetcher.fetch_all()
+ensure_models(os.path.join(os.path.dirname(__file__), "backend", "Models"))
 
-# 2) init adapters
-from backend.Adapters.Place365 import Place365Adapter
-from backend.Adapters.RFDETR import RFDETRAdapter
-from backend.Adapters.InModel import InModelAdapter
+# 2) init adapters (example)
+from WebInterface.backend.Adapters.Place365 import Place365Adapter
+from WebInterface.backend.Adapters.RFDETR import RFDETRAdapter
+from WebInterface.backend.Adapters.InModel import InModelAdapter
 
-place_adapter = Place365Adapter(
-    prototxt_path="backend/Models/Place365/deploy_resnet152_places365.prototxt",
-    caffemodel_path="backend/Models/Place365/resnet152_places365.caffemodel",
-)
-rfdetr_adapter = RFDETRAdapter(model_path="backend/Models/ObjectDetection/rf_detr_checkpoint.pth")
+place_adapter = Place365Adapter(models_dir=os.path.join(os.path.dirname(__file__), "backend", "Models"))
+rfdetr_adapter = RFDETRAdapter(checkpoint_path=os.path.join(os.path.dirname(__file__), "backend", "Models", "ObjectDetection", "rf_detr_checkpoint.pth"))
+inmodel_adapter = InModelAdapter(weights_path=os.path.join(os.path.dirname(__file__), "backend", "Models", "CustomModel", "ObjectDetection.pt"))
 
 # 3) create app and mount routers
 app = FastAPI()
 # register routers from WebInterface/API
-
-if __name__ == '__main__':
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("APP_PORT",8000)))
 ```
 
 ---

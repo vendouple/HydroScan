@@ -1,0 +1,12 @@
+# Ignore Python cache files
+__pycache__/
+*.pyc
+*.cpython-311.pyc
+*.pt
+*.part
+*.caffemodel
+*.prototxt
+__init__.py
+
+#ignore history file
+history/
