@@ -63,10 +63,11 @@ def create_app() -> FastAPI:
         return templates.TemplateResponse("index.html", {"request": request})
 
     try:
-        from WebInterface.API import analyze, results  # noqa: F401
+        from WebInterface.API import analyze, models, results  # noqa: F401
 
         app.include_router(analyze.router, prefix="/api")
         app.include_router(results.router, prefix="/api")
+        app.include_router(models.router, prefix="/api")
     except Exception as e:
         print(f"[HydroScan] Router include skipped: {e}")
 

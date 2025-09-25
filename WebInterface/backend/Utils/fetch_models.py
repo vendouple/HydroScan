@@ -1,3 +1,4 @@
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -124,3 +125,54 @@ def ensure_models(base_dir: str) -> None:
     _ensure(PLACES365_CAFFE_URL, caffemodel_path, "Places365 caffemodel")
     _ensure(PLACES365_CATEGORIES_URL, categories_path, "Places365 categories")
     _ensure(PLACES365_IO_URL, io_path, "Places365 IO list")
+
+
+def _sha256(path: Path) -> str | None:
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except Exception:
+        return None
+
+
+def get_model_status(base_dir: str) -> dict:
+    models_dir = Path(base_dir)
+    place365_dir = models_dir / "Place365"
+    assets = {
+        "place365_prototxt": place365_dir / "deploy_resnet152_places365.prototxt",
+        "place365_caffemodel": place365_dir / "resnet152_places365.caffemodel",
+        "place365_categories": place365_dir / "categories_places365.txt",
+        "place365_io": place365_dir / "IO_places365.txt",
+    }
+
+    status = {}
+    for name, path in assets.items():
+        status[name] = {
+            "path": str(path),
+            "exists": path.exists(),
+            "sha256": _sha256(path),
+        }
+
+    object_detection_dir = models_dir / "ObjectDetection"
+    custom_dir = models_dir / "CustomModel"
+    for det_file in ["rf_detr_checkpoint.pth", "yolo11n.pt", "yolov12_best.pt"]:
+        path = object_detection_dir / det_file
+        status[f"detector_{det_file}"] = {
+            "path": str(path),
+            "exists": path.exists(),
+            "sha256": _sha256(path),
+        }
+    for custom_file in ["ObjectDetection.pt", "Classification.pt"]:
+        path = custom_dir / custom_file
+        status[f"custom_{custom_file}"] = {
+            "path": str(path),
+            "exists": path.exists(),
+            "sha256": _sha256(path),
+        }
+
+    return status

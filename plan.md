@@ -30,6 +30,13 @@ Clarifications applied (2025-09-22):
 
 ---
 
+## Backend implementation status (2025-09-25)
+
+- Phase B (adapters & processing) completed: Places365, RF-DETR, and in-house model adapters implemented with unified outputs; filters, visual metrics, and aggregation pipeline wired into `/api/analyze`.
+- Phase C scoring logic in place: potability/confidence calculator follows WHO-aligned weights with automatic normalization when external data is missing; Indonesian ingestion module fetches/caches nearest station data and normalizes parameter scores.
+- Analyze flow now executes full pipeline (media validation, variant generation, detection, scoring, persistence) and stores structured results under `history/{analysis_id}/` along with optional debug artifacts.
+- `/api/models/status` exposes asset health reporting sha256 hashes for downloaded checkpoints.
+
 # 1. Required model links (Places365 exact assets)
 
 Use these exact resources for Places365 auto-download (required):
