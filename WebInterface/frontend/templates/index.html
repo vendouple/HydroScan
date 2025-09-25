@@ -7,44 +7,167 @@
     <link rel="stylesheet" href="/static/css/main.css" />
   </head>
   <body>
-    <header>
+    <header class="hero">
       <h1>HydroScan</h1>
       <p class="subtitle">
-        Analyze water images/videos for potability and confidence
+        Local-first water safety insights powered by computer vision and
+        regional data.
       </p>
     </header>
 
-    <main>
-      <section class="card">
-        <form id="analyze-form">
-          <label
-            >Media (images/videos):
-            <input type="file" id="files" name="files" multiple />
+    <main id="layout">
+      <section class="card input-card">
+        <div class="card-header">
+          <h2>Submit media</h2>
+          <p class="card-subtitle">
+            Up to 25 images and 5 videos (≤ 60 seconds each). Describe smell,
+            color, feel, temperature.
+          </p>
+        </div>
+        <form id="analyze-form" autocomplete="off">
+          <label class="field">
+            <span class="label">Media (images / videos)</span>
+            <input
+              type="file"
+              id="files"
+              name="files"
+              accept="image/*,video/*"
+              multiple
+              required />
           </label>
-          <label
-            >Description:
+
+          <label class="field">
+            <span class="label">Observation notes</span>
             <textarea
               id="description"
               name="description"
-              rows="3"
-              placeholder="Smell, color, feel, temperature..."></textarea>
+              rows="4"
+              placeholder="Example: Slight smell of chlorine, light green tint, feels slippery..."></textarea>
           </label>
+
+          <div class="grid two">
+            <label class="field">
+              <span class="label">Latitude (optional)</span>
+              <input type="number" id="lat" name="lat" step="any" />
+            </label>
+            <label class="field">
+              <span class="label">Longitude (optional)</span>
+              <input type="number" id="lon" name="lon" step="any" />
+            </label>
+          </div>
+
+          <div class="location-row">
+            <button type="button" class="ghost" id="locate-btn">
+              Use my location
+            </button>
+            <span class="location-status" id="location-status"
+              >Location not set</span
+            >
+          </div>
+
           <label class="checkbox">
-            <input type="checkbox" id="debug" name="debug" /> Debug
+            <input type="checkbox" id="debug" name="debug" />
+            <span
+              >Enable debug artifacts (saves annotated frames & detailed
+              logs)</span
+            >
           </label>
+
           <div class="actions">
-            <button type="submit">Analyze</button>
-            <button type="reset">Clear</button>
+            <button type="submit" id="analyze-btn">Analyze</button>
+            <button type="reset" id="reset-btn">Clear</button>
           </div>
         </form>
+
+        <div class="disclaimer">
+          HydroScan provides informational analysis only and is not a substitute
+          for laboratory testing or public health advice.
+        </div>
       </section>
 
-      <section class="card" id="status-card">
-        <h2>Status</h2>
-        <pre id="status">Idle</pre>
+      <section class="card timeline-card" id="timeline-card">
+        <div class="card-header">
+          <h2>Analysis timeline</h2>
+          <span class="analysis-id" id="analysis-id">No analysis yet</span>
+        </div>
+        <ul class="timeline" id="timeline">
+          <li class="timeline-item idle">
+            <div class="marker"></div>
+            <div class="content">
+              <p class="title">Waiting for upload</p>
+              <p class="detail">Start an analysis to view processing stages.</p>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <section class="card results-card hidden" id="results-card">
+        <div class="card-header">
+          <h2>Results</h2>
+          <span class="result-timestamp" id="result-timestamp"></span>
+        </div>
+        <div class="score-grid">
+          <div class="score-block">
+            <p class="label">Potability score</p>
+            <p class="score" id="potability-score">--</p>
+            <div class="band" id="band-label">Band: --</div>
+          </div>
+          <div class="score-block">
+            <p class="label">Confidence score</p>
+            <p class="score" id="confidence-score">--</p>
+            <div class="confidence-pill" id="confidence-band">--</div>
+          </div>
+        </div>
+
+        <div class="components" id="component-breakdown"></div>
+
+        <div class="secondary-grid" id="secondary-metrics"></div>
+
+        <div class="external" id="external-data"></div>
+
+        <div class="user-analysis hidden" id="user-analysis">
+          <h3>User input assessment</h3>
+          <p class="conclusion" id="user-analysis-conclusion">
+            No conclusion generated.
+          </p>
+          <div class="user-analysis-meta">
+            <span class="badge" id="user-analysis-score">--</span>
+            <span class="badge" id="user-analysis-confidence">--</span>
+            <span class="badge muted hidden" id="user-analysis-model"></span>
+          </div>
+          <p class="rationale hidden" id="user-analysis-rationale"></p>
+        </div>
+      </section>
+
+      <section class="card debug-card hidden" id="debug-card">
+        <div class="card-header">
+          <h2>Debug console</h2>
+          <div class="debug-actions">
+            <a id="download-debug" class="ghost" href="#" download
+              >Download debug JSON</a
+            >
+            <a
+              id="open-result-json"
+              class="ghost"
+              href="#"
+              target="_blank"
+              rel="noopener"
+              >Open result JSON</a
+            >
+          </div>
+        </div>
+        <pre class="debug-log" id="debug-log">Debug not enabled.</pre>
+
+        <div class="debug-gallery" id="debug-gallery">
+          <h3>Detection snapshots</h3>
+          <p class="empty" id="debug-gallery-empty">
+            No detection snapshots generated yet.
+          </p>
+          <div class="gallery-grid" id="debug-gallery-grid"></div>
+        </div>
       </section>
     </main>
 
-    <script src="/static/js/ui.js"></script>
+    <script src="/static/js/ui.js" type="module"></script>
   </body>
 </html>

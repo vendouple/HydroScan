@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
 
 
 router = APIRouter()
@@ -30,4 +31,25 @@ async def get_results(analysis_id: str, include_debug: bool = Query(False)) -> A
         else:
             result["debug_artifacts"] = None
 
+        debug_manifest = result.get("debug", {}).get("detection_images") or []
+        base_url = f"/api/results/{analysis_id}/artifacts"
+        for entry in debug_manifest:
+            rel = entry.get("relative_path") or entry.get("filename")
+            if rel:
+                entry["url"] = "{}/{}".format(base_url, str(rel).replace("\\", "/"))
+
     return result
+
+
+@router.get("/results/{analysis_id}/artifacts/{artifact_path:path}")
+async def get_debug_artifact(analysis_id: str, artifact_path: str) -> Any:
+    analysis_dir = HISTORY_DIR / analysis_id
+    debug_dir = (analysis_dir / "debug").resolve()
+    target_path = (debug_dir / artifact_path).resolve()
+
+    if not str(target_path).startswith(str(debug_dir)):
+        raise HTTPException(status_code=403, detail="Invalid artifact path")
+    if not target_path.exists() or not target_path.is_file():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    return FileResponse(target_path)

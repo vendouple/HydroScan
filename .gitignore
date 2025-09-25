@@ -11,3 +11,4 @@ __init__.py
 *.txt
 #ignore history file
 history/
+*.pth

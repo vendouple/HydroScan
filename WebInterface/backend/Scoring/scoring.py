@@ -164,12 +164,29 @@ def compute_scores(context: Dict[str, Any]) -> Dict[str, Any]:
     user_text: str | None = context.get("user_text")
     media_info: Dict[str, int] = context.get("media_info", {})
 
+    user_assessment = context.get("user_text_assessment")
+
     external_score, external_confidence = _score_external(external)
     visual_score, image_quality_score = _score_visual_metrics(visual_avg)
     color_score = _score_color(visual_avg)
     model_confidence_score = _score_model_confidence(detections)
     temporal_score = _score_temporal(metrics_by_frame)
-    user_text_score, user_text_confidence = _score_user_text(user_text)
+
+    user_text_active = False
+    if isinstance(user_assessment, dict):
+        if user_assessment.get("available"):
+            user_text_score = _clamp(float(user_assessment.get("score", 50.0)))
+            user_text_confidence = _clamp(
+                float(user_assessment.get("confidence", 50.0))
+            )
+            user_text_active = True
+        else:
+            user_text_score, user_text_confidence = _score_user_text(user_text)
+    elif user_text:
+        user_text_score, user_text_confidence = _score_user_text(user_text)
+        user_text_active = True
+    else:
+        user_text_score, user_text_confidence = _score_user_text(None)
     corroboration_score, corroboration_confidence = _score_corroboration(
         media_info.get("media_count", 0),
         media_info.get("variant_count", 0),
@@ -183,7 +200,7 @@ def compute_scores(context: Dict[str, Any]) -> Dict[str, Any]:
             "visual",
             "model_confidence",
             "color",
-            "user_text",
+            "user_text" if user_text_active else None,
             "temporal",
             "corroboration",
         ],
@@ -222,7 +239,7 @@ def compute_scores(context: Dict[str, Any]) -> Dict[str, Any]:
             "image_quality",
             "media_corroboration",
             "external" if external_confidence > 0 else None,
-            "user_text",
+            "user_text" if user_text_active else None,
         ],
     )
 

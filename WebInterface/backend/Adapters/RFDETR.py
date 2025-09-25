@@ -7,13 +7,13 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 from PIL import Image
 
 try:
-    from rfdetr import RFDETRBase  # type: ignore
-    from rfdetr.util.coco_classes import COCO_CLASSES  # type: ignore
+    from rfdetr import RFDETRBase
+    from rfdetr.util.coco_classes import COCO_CLASSES
 
     _HAS_RFDETR = True
-except Exception:  # pragma: no cover - optional dependency for dev environments
-    RFDETRBase = None  # type: ignore
-    COCO_CLASSES = []  # type: ignore
+except Exception:
+    RFDETRBase = None
+    COCO_CLASSES = []
     _HAS_RFDETR = False
 
 
@@ -25,9 +25,23 @@ class RFDETRAdapter:
         checkpoint_path: Optional[str] = None,
         device: Optional[str] = None,
         optimize: bool = True,
+        model_name: Optional[str] = None,
     ) -> None:
         self.device = device or os.environ.get("RFDETR_DEVICE")
+        models_root = Path(os.environ.get("HYDROSCAN_MODELS_DIR", ""))
+        if not models_root:
+            models_root = Path(__file__).resolve().parents[2] / "Models"
+        models_root.mkdir(parents=True, exist_ok=True)
+
+        cache_root = models_root / "RFDETR"
+        cache_root.mkdir(parents=True, exist_ok=True)
+
+        os.environ.setdefault("RFD_MODEL_CACHE", str(cache_root))
+
         self.checkpoint_path = checkpoint_path or os.environ.get("RFDETR_CHECKPOINT")
+        self.model_name = (
+            model_name or os.environ.get("RFDETR_MODEL_NAME") or "rf_detr_m"
+        )
         self._class_names: Sequence[str] = list(COCO_CLASSES)
         self.model = None
 
@@ -38,6 +52,10 @@ class RFDETRAdapter:
         kwargs: Dict[str, Any] = {}
         if self.checkpoint_path and Path(self.checkpoint_path).exists():
             kwargs["checkpoint_path"] = self.checkpoint_path
+        else:
+            kwargs.setdefault("cache_dir", str(cache_root))
+        if self.model_name:
+            kwargs.setdefault("model_name", self.model_name)
 
         try:
             model = RFDETRBase(**kwargs)

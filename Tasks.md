@@ -16,6 +16,7 @@ This file tracks implementation progress aligned with `plan.md`.
 
 ## Next
 
-- Implement adapters and pipeline incrementally
-- Add tests and example media
-- Polish UI (timeline, debug console, results view)
+- [x] Implement adapters and pipeline incrementally
+- [ ] Add tests and example media
+- [x] Polish UI (timeline, debug console, results view)
+- [ ] Calibrate scoring weights against new labelled samples
