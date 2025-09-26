@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HydroScan - Model Lab</title>
+    <link rel="stylesheet" href="/static/css/main.css" />
+    <style>
+      .model-lab-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+
+      .model-selector {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .model-btn {
+        padding: 12px 24px;
+        border: 2px solid rgba(59, 130, 246, 0.3);
+        background: rgba(59, 130, 246, 0.1);
+        color: var(--accent);
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+
+      .model-btn.active {
+        background: rgba(59, 130, 246, 0.3);
+        border-color: var(--accent);
+      }
+
+      .model-btn:hover {
+        background: rgba(59, 130, 246, 0.2);
+      }
+
+      .test-results {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+
+      .result-section {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .image-preview {
+        max-width: 100%;
+        border-radius: 12px;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+      }
+
+      .stack-trace {
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        border-radius: 8px;
+        padding: 16px;
+        font-family: "Courier New", monospace;
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+        color: #ef4444;
+        max-height: 300px;
+        overflow-y: auto;
+      }
+
+      .model-output {
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        padding: 16px;
+        font-family: "Courier New", monospace;
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+        max-height: 400px;
+        overflow-y: auto;
+      }
+
+      .detection-info {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .detection-item {
+        background: rgba(59, 130, 246, 0.1);
+        border: 1px solid rgba(59, 130, 246, 0.2);
+        border-radius: 8px;
+        padding: 12px;
+      }
+
+      .debug-info {
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        border-radius: 6px;
+        padding: 10px;
+        margin: 8px 0;
+        font-size: 0.85em;
+        font-family: "Consolas", "Monaco", monospace;
+        color: #6ee7b7;
+      }
+
+      .loading {
+        opacity: 0.6;
+        pointer-events: none;
+      }
+
+      @media (max-width: 768px) {
+        .test-results {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <h1>
+        <a href="/" style="text-decoration: none; color: inherit">HydroScan</a>
+        - Model Lab
+      </h1>
+      <p class="subtitle">
+        Test individual models with detailed diagnostics and stack traces
+      </p>
+    </header>
+
+    <div class="model-lab-container">
+      <!-- Model Selection -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Select Model to Test</h2>
+        </div>
+        <div class="model-selector">
+          <button class="model-btn active" data-model="places365">
+            Places365
+          </button>
+          <button class="model-btn" data-model="rfdetr">RF-DETR</button>
+          <button class="model-btn" data-model="inmodel-classification">
+            YOLOv11 Classification
+          </button>
+          <button class="model-btn" data-model="inmodel-obb">
+            YOLOv11 OBB
+          </button>
+          <button class="model-btn" data-model="comprehensive">
+            Comprehensive Test
+          </button>
+        </div>
+      </div>
+
+      <!-- Image Upload -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Upload Test Image</h2>
+        </div>
+        <form id="test-form">
+          <label class="field">
+            <span class="label">Test Image</span>
+            <input type="file" id="test-image" accept="image/*" required />
+          </label>
+          <button type="submit" id="test-btn" class="btn primary">
+            Run Test
+          </button>
+        </form>
+      </div>
+
+      <!-- Results -->
+      <div class="test-results" id="results-container" style="display: none">
+        <!-- Original Image -->
+        <div class="result-section">
+          <div class="card">
+            <div class="card-header">
+              <h3>Original Image</h3>
+            </div>
+            <img
+              id="original-image"
+              class="image-preview"
+              alt="Original image" />
+          </div>
+        </div>
+
+        <!-- Processed Results -->
+        <div class="result-section">
+          <div class="card">
+            <div class="card-header">
+              <h3 id="result-title">Model Results</h3>
+            </div>
+            <div id="result-content">
+              <!-- Will be populated with results -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Full Results -->
+      <div class="card" id="full-results-card" style="display: none">
+        <div class="card-header">
+          <h3>Detailed Output</h3>
+        </div>
+        <div class="model-output" id="detailed-output"></div>
+      </div>
+
+      <!-- Stack Trace -->
+      <div class="card" id="error-card" style="display: none">
+        <div class="card-header">
+          <h3>Error Details</h3>
+        </div>
+        <div class="stack-trace" id="error-details"></div>
+      </div>
+    </div>
+
+    <script>
+      const testForm = document.getElementById("test-form");
+      const testImage = document.getElementById("test-image");
+      const testBtn = document.getElementById("test-btn");
+      const modelBtns = document.querySelectorAll(".model-btn");
+      const resultsContainer = document.getElementById("results-container");
+      const originalImage = document.getElementById("original-image");
+      const resultTitle = document.getElementById("result-title");
+      const resultContent = document.getElementById("result-content");
+      const fullResultsCard = document.getElementById("full-results-card");
+      const detailedOutput = document.getElementById("detailed-output");
+      const errorCard = document.getElementById("error-card");
+      const errorDetails = document.getElementById("error-details");
+
+      let selectedModel = "places365";
+
+      // Model selection
+      modelBtns.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          modelBtns.forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          selectedModel = btn.dataset.model;
+        });
+      });
+
+      // Form submission
+      testForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        if (!testImage.files[0]) {
+          alert("Please select an image");
+          return;
+        }
+
+        // Show loading state
+        testBtn.disabled = true;
+        testBtn.textContent = "Testing...";
+        document.body.classList.add("loading");
+
+        // Hide previous results
+        resultsContainer.style.display = "none";
+        fullResultsCard.style.display = "none";
+        errorCard.style.display = "none";
+
+        const formData = new FormData();
+        formData.append("image", testImage.files[0]);
+        formData.append("model", selectedModel);
+
+        try {
+          const response = await fetch("/api/model-test", {
+            method: "POST",
+            body: formData,
+          });
+
+          const result = await response.json();
+
+          if (!response.ok) {
+            throw new Error(result.detail || `HTTP ${response.status}`);
+          }
+
+          displayResults(result);
+        } catch (error) {
+          displayError(error);
+        } finally {
+          testBtn.disabled = false;
+          testBtn.textContent = "Run Test";
+          document.body.classList.remove("loading");
+        }
+      });
+
+      function displayResults(result) {
+        // Show original image
+        const file = testImage.files[0];
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          originalImage.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+
+        // Show results container
+        resultsContainer.style.display = "grid";
+
+        // Update title
+        resultTitle.textContent = `${selectedModel.toUpperCase()} Results`;
+
+        // Display specific results based on model
+        if (result.success) {
+          displaySuccessResults(result);
+        } else {
+          displayModelError(result);
+        }
+
+        // Show detailed output
+        fullResultsCard.style.display = "block";
+        detailedOutput.textContent = JSON.stringify(result, null, 2);
+      }
+
+      function displaySuccessResults(result) {
+        let content = "";
+
+        if (selectedModel === "places365") {
+          content = `
+            <div class="detection-info">
+              <div class="detection-item">
+                <strong>Scene:</strong> ${result.scene || "Unknown"}
+                <br><strong>Confidence:</strong> ${(
+                  result.confidence || 0
+                ).toFixed(2)}
+              </div>
+            </div>
+          `;
+        } else if (selectedModel === "inmodel-classification") {
+          // Show debug info
+          if (result.cls_weights_used) {
+            content += `<div class="debug-info"><strong>Model Used:</strong> ${result.cls_weights_used}</div>`;
+          }
+          if (result.searched_paths) {
+            content += `<div class="debug-info"><strong>Searched Paths:</strong> ${result.searched_paths.join(
+              ", "
+            )}</div>`;
+          }
+
+          if (result.classifications && result.classifications.length > 0) {
+            content += '<div class="detection-info">';
+            result.classifications.forEach((cls) => {
+              content += `
+                <div class="detection-item">
+                  <strong>Class:</strong> ${cls.class}
+                  <br><strong>Confidence:</strong> ${cls.confidence.toFixed(2)}
+                </div>
+              `;
+            });
+            content += "</div>";
+          } else {
+            content +=
+              '<div class="detection-item">No classifications detected</div>';
+          }
+        } else if (selectedModel === "inmodel-obb") {
+          // Show debug info
+          if (result.obb_weights_used) {
+            content += `<div class="debug-info"><strong>OBB Model Used:</strong> ${result.obb_weights_used}</div>`;
+          }
+          if (result.searched_paths) {
+            content += `<div class="debug-info"><strong>Searched Paths:</strong> ${result.searched_paths.join(
+              ", "
+            )}</div>`;
+          }
+
+          if (result.obb_detections && result.obb_detections.length > 0) {
+            content += '<div class="detection-info">';
+            result.obb_detections.forEach((det) => {
+              content += `
+                <div class="detection-item">
+                  <strong>Class:</strong> ${det.class}
+                  <br><strong>Confidence:</strong> ${det.confidence.toFixed(2)}
+                  <br><strong>OBB:</strong> [${det.obb
+                    .map((v) => v.toFixed(1))
+                    .join(", ")}]
+                </div>
+              `;
+            });
+            content += "</div>";
+          } else {
+            content +=
+              '<div class="detection-item">No OBB detections found</div>';
+          }
+        } else if (result.detections || selectedModel === "comprehensive") {
+          // Show model loading debug info for comprehensive tests
+          if (result.models_loaded) {
+            content += `<div class="debug-info">
+              <strong>Models Loaded:</strong> 
+              Detection: ${result.models_loaded.detection ? "✓" : "✗"}, 
+              Classification: ${
+                result.models_loaded.classification ? "✓" : "✗"
+              }, 
+              OBB: ${result.models_loaded.obb ? "✓" : "✗"}
+            </div>`;
+          }
+
+          if (result.detections && result.detections.length > 0) {
+            content = '<div class="detection-info">';
+            result.detections.forEach((det) => {
+              content += `
+                <div class="detection-item">
+                  <strong>Class:</strong> ${det.class_name || det.class}
+                  <br><strong>Confidence:</strong> ${(
+                    det.score ||
+                    det.confidence ||
+                    0
+                  ).toFixed(2)}
+                  ${
+                    det.bbox
+                      ? `<br><strong>BBox:</strong> [${det.bbox
+                          .map((v) => Math.round(v))
+                          .join(", ")}]`
+                      : ""
+                  }
+                </div>
+              `;
+            });
+            content += "</div>";
+          } else {
+            content = '<div class="detection-item">No detections found</div>';
+          }
+        }
+
+        // Show annotated image if available
+        if (result.annotated_image) {
+          content += `<img src="data:image/jpeg;base64,${result.annotated_image}" class="image-preview" alt="Annotated results" />`;
+        }
+
+        resultContent.innerHTML = content;
+      }
+
+      function displayModelError(result) {
+        resultContent.innerHTML = `
+          <div class="detection-item" style="border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.1);">
+            <strong>Model Error:</strong> ${
+              result.error || "Unknown error occurred"
+            }
+          </div>
+        `;
+
+        if (result.stack_trace) {
+          errorCard.style.display = "block";
+          errorDetails.textContent = result.stack_trace;
+        }
+      }
+
+      function displayError(error) {
+        errorCard.style.display = "block";
+        errorDetails.textContent = `Error: ${error.message}\n\nStack trace not available (client-side error)`;
+
+        resultsContainer.style.display = "grid";
+        resultTitle.textContent = "Error";
+        resultContent.innerHTML = `
+          <div class="detection-item" style="border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.1);">
+            <strong>Request Error:</strong> ${error.message}
+          </div>
+        `;
+      }
+    </script>
+  </body>
+</html>

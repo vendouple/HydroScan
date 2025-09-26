@@ -2,6 +2,7 @@ const form = document.getElementById("analyze-form");
 const filesInput = document.getElementById("files");
 const descriptionInput = document.getElementById("description");
 const debugInput = document.getElementById("debug");
+const dontSaveInput = document.getElementById("dont-save");
 const latInput = document.getElementById("lat");
 const lonInput = document.getElementById("lon");
 const locateBtn = document.getElementById("locate-btn");
@@ -24,8 +25,9 @@ const externalDataEl = document.getElementById("external-data");
 
 const debugCard = document.getElementById("debug-card");
 const debugLogEl = document.getElementById("debug-log");
-const debugGalleryGrid = document.getElementById("debug-gallery-grid");
-const debugGalleryEmpty = document.getElementById("debug-gallery-empty");
+const debugSnapshotsEl = document.getElementById("debug-snapshots");
+const debugSnapshotsEmptyEl = document.getElementById("debug-snapshots-empty");
+const snapshotGroupsEl = document.getElementById("snapshot-groups");
 const downloadDebugLink = document.getElementById("download-debug");
 const openResultLink = document.getElementById("open-result-json");
 const userAnalysisCard = document.getElementById("user-analysis");
@@ -41,20 +43,31 @@ const userAnalysisRationaleEl = document.getElementById(
   "user-analysis-rationale"
 );
 
+const historyCard = document.getElementById("history-card");
+const historyEmptyEl = document.getElementById("history-empty");
+const historyListEl = document.getElementById("history-list");
+const refreshHistoryBtn = document.getElementById("refresh-history");
+
 const body = document.body;
 
 const TIMELINE_LABELS = {
-  preparing_media: "Preparing media",
-  scene_classifier: "Running scene classifier",
-  applying_filters: "Applying filters",
-  running_detector: "Running detector",
-  aggregating_results: "Aggregating results",
-  external_data: "Fetching external data",
+  preparing_media: "Media ingestion",
+  scene_detection: "Scene detection (Places365)",
+  scene_branch: "Scene routing",
+  filter_strategy: "Adaptive filter stack",
+  detector_inference: "Detection engines",
+  aggregation: "Aggregating results",
+  outdoor_external: "Outdoor external data",
+  outdoor_detector: "Outdoor detector selection",
+  packaging_scan: "Packaging detection",
+  ocr_scan: "Brand & OCR analysis",
+  water_confirmation: "Water confirmation",
+  external_data: "External data",
+  user_input_analysis: "User input analysis",
   scoring: "Scoring",
   debug_detections: "Detection snapshots",
   finalizing: "Finalizing",
   error: "Analysis error",
-  user_input_analysis: "User input analysis",
 };
 
 const STATUS_LABELS = {
@@ -87,37 +100,40 @@ const CONFIDENCE_BANDS = {
 const TIMELINE_FLOW = [
   {
     step: "preparing_media",
-    hint: "Validating uploads",
+    hint: "Validating uploads & deduplicating frames",
+  },
+  { step: "scene_detection", hint: "Identifying indoor/outdoor context" },
+  { step: "scene_branch", hint: "Selecting outdoor or indoor workflow" },
+  { step: "filter_strategy", hint: "Selecting adaptive filters" },
+  { step: "detector_inference", hint: "Running detectors" },
+  { step: "aggregation", hint: "Merging detections & metrics" },
+  {
+    step: "outdoor_external",
+    hint: "Fetching outdoor external data",
+    optional: true,
   },
   {
-    step: "scene_classifier",
-    hint: "Checking indoor/outdoor context",
+    step: "outdoor_detector",
+    hint: "Selecting outdoor detector",
+    optional: true,
   },
   {
-    step: "applying_filters",
-    hint: "Generating enhanced variants",
+    step: "packaging_scan",
+    hint: "Scanning for packaging",
+    optional: true,
   },
+  { step: "ocr_scan", hint: "Analyzing branding", optional: true },
+  { step: "water_confirmation", hint: "Confirming water presence" },
   {
-    step: "running_detector",
-    hint: "Locating water features",
+    step: "user_input_analysis",
+    hint: "Interpreting user notes",
+    optional: true,
   },
-  {
-    step: "aggregating_results",
-    hint: "Merging per-frame findings",
-  },
-  {
-    step: "external_data",
-    hint: "Looking up nearby stations",
-  },
-  {
-    step: "scoring",
-    hint: "Computing potability score",
-  },
-  {
-    step: "finalizing",
-    hint: "Saving results",
-  },
+  { step: "scoring", hint: "Computing potability score" },
+  { step: "finalizing", hint: "Saving results" },
 ];
+
+const LIVE_TIMELINE_FLOW = TIMELINE_FLOW.filter((entry) => !entry.optional);
 
 let liveTimelineTimer = null;
 let liveTimelineIndex = 0;
@@ -171,12 +187,12 @@ const setTimelineStatus = (step, status = "pending", detail = "") => {
 };
 
 const renderTimelineSkeleton = () => {
-  if (!TIMELINE_FLOW.length) {
+  if (!LIVE_TIMELINE_FLOW.length) {
     clearTimeline();
     return;
   }
 
-  timelineEl.innerHTML = TIMELINE_FLOW.map((entry, index) => {
+  timelineEl.innerHTML = LIVE_TIMELINE_FLOW.map((entry, index) => {
     const status = index === 0 ? "in-progress" : "pending";
     const baseDetail = entry.hint || STATUS_LABELS[status];
     return createTimelineItemMarkup(entry.step, status, baseDetail);
@@ -248,7 +264,9 @@ const renderTimeline = (entries = []) => {
     entries.map((entry) => [entry.step || "", entry])
   );
 
-  const flowMarkup = TIMELINE_FLOW.map((entry) => {
+  const flowMarkup = TIMELINE_FLOW.filter(
+    (entry) => !entry.optional || entriesByStep.has(entry.step)
+  ).map((entry) => {
     const matching = entriesByStep.get(entry.step) || {};
     const status = matching.status || "done";
     const detail =
@@ -277,10 +295,10 @@ const renderTimeline = (entries = []) => {
 };
 
 const advanceLiveTimeline = () => {
-  if (!liveTimelineActive || !TIMELINE_FLOW.length) return;
+  if (!liveTimelineActive || !LIVE_TIMELINE_FLOW.length) return;
 
-  const currentEntry = TIMELINE_FLOW[liveTimelineIndex];
-  const hasNext = liveTimelineIndex < TIMELINE_FLOW.length - 1;
+  const currentEntry = LIVE_TIMELINE_FLOW[liveTimelineIndex];
+  const hasNext = liveTimelineIndex < LIVE_TIMELINE_FLOW.length - 1;
 
   if (currentEntry && hasNext) {
     setTimelineStatus(
@@ -292,7 +310,7 @@ const advanceLiveTimeline = () => {
 
   if (hasNext) {
     liveTimelineIndex += 1;
-    const nextEntry = TIMELINE_FLOW[liveTimelineIndex];
+    const nextEntry = LIVE_TIMELINE_FLOW[liveTimelineIndex];
     if (nextEntry) {
       setTimelineStatus(nextEntry.step, "in-progress", nextEntry.hint);
     }
@@ -312,7 +330,7 @@ const advanceLiveTimeline = () => {
 const startLiveTimeline = () => {
   stopLiveTimeline(false);
 
-  if (!TIMELINE_FLOW.length) {
+  if (!LIVE_TIMELINE_FLOW.length) {
     clearTimeline();
     return;
   }
@@ -321,7 +339,7 @@ const startLiveTimeline = () => {
   liveTimelineIndex = 0;
   renderTimelineSkeleton();
 
-  const firstEntry = TIMELINE_FLOW[0];
+  const firstEntry = LIVE_TIMELINE_FLOW[0];
   if (firstEntry) {
     setTimelineStatus(firstEntry.step, "in-progress", firstEntry.hint);
   }
@@ -340,12 +358,14 @@ const stopLiveTimeline = (completed = true) => {
   }
 
   if (completed) {
-    TIMELINE_FLOW.forEach((entry) =>
+    LIVE_TIMELINE_FLOW.forEach((entry) =>
       setTimelineStatus(entry.step, "done", STATUS_LABELS.done)
     );
   } else {
     const currentEntry =
-      TIMELINE_FLOW[Math.min(liveTimelineIndex, TIMELINE_FLOW.length - 1)];
+      LIVE_TIMELINE_FLOW[
+        Math.min(liveTimelineIndex, LIVE_TIMELINE_FLOW.length - 1)
+      ];
     if (currentEntry) {
       setTimelineStatus(
         currentEntry.step,
@@ -651,35 +671,89 @@ const buildDebugLog = (result, timelineEntries) => {
   return lines.join("\n");
 };
 
-const renderDebugGallery = (images = [], analysisId) => {
-  if (!images.length) {
-    debugGalleryGrid.innerHTML = "";
-    debugGalleryEmpty.classList.remove("hidden");
-    debugGalleryEmpty.textContent = "No detection snapshots generated yet.";
+const renderSnapshotGroups = (snapshots = {}, analysisId) => {
+  if (!snapshotGroupsEl || !debugSnapshotsEmptyEl) return;
+
+  const categories = Object.entries(snapshots).filter(
+    ([, entries]) => Array.isArray(entries) && entries.length
+  );
+
+  if (!categories.length) {
+    snapshotGroupsEl.innerHTML = "";
+    debugSnapshotsEmptyEl.classList.remove("hidden");
+    debugSnapshotsEmptyEl.textContent = "No detection snapshots generated yet.";
     return;
   }
 
-  debugGalleryEmpty.classList.add("hidden");
-  debugGalleryGrid.innerHTML = images
-    .map((img) => {
-      const label = `${titleCase(img.variant || "variant")} · frame ${
-        Number(img.frame_index) + 1 || 1
-      }`;
-      const detections = img.detections || 0;
-      const url =
-        img.url || `/api/results/${analysisId}/artifacts/${img.relative_path}`;
+  debugSnapshotsEmptyEl.classList.add("hidden");
+  snapshotGroupsEl.innerHTML = categories
+    .map(([category, entries]) => {
+      const friendly = titleCase(category || "snapshots");
+      const cards = entries
+        .map((entry, index) => {
+          const frameLabel =
+            entry.frame_index !== undefined && entry.frame_index !== null
+              ? `Frame ${Number(entry.frame_index) + 1}`
+              : null;
+          const variantLabel = entry.variant
+            ? titleCase(entry.variant)
+            : entry.label
+            ? titleCase(entry.label)
+            : null;
+          const detectionCount =
+            entry.detections !== undefined && entry.detections !== null
+              ? `${entry.detections} detections`
+              : null;
+          const detailParts = [frameLabel, variantLabel, detectionCount].filter(
+            Boolean
+          );
+          const labelText =
+            entry.label || variantLabel || `Snapshot ${index + 1}`;
+          const url =
+            entry.url ||
+            (analysisId && entry.relative_path
+              ? `/api/results/${analysisId}/artifacts/${entry.relative_path}`
+              : null);
+
+          return `
+            <figure class="snapshot-card">
+              ${
+                url
+                  ? `<a href="${url}" target="_blank" rel="noopener">
+                      <img src="${url}" alt="${friendly} snapshot" loading="lazy" />
+                    </a>`
+                  : ""
+              }
+              <div class="snapshot-meta">
+                <strong>${titleCase(labelText)}</strong>
+                ${
+                  detailParts.length
+                    ? `<span>${detailParts.join(" · ")}</span>`
+                    : ""
+                }
+                ${
+                  url
+                    ? `<a href="${url}" target="_blank" rel="noopener">Open full size</a>`
+                    : ""
+                }
+              </div>
+            </figure>
+          `;
+        })
+        .join("");
+
+      const openAttr = category === "detector" ? "open" : "";
 
       return `
-        <figure class="gallery-card">
-          <a href="${url}" target="_blank" rel="noopener">
-            <img src="${url}" alt="Detection snapshot" loading="lazy" />
-          </a>
-          <figcaption class="caption">
-            <strong>${label}</strong>
-            <span>${detections} detections</span>
-            <a href="${url}" target="_blank" rel="noopener">Open full size</a>
-          </figcaption>
-        </figure>
+        <details class="snapshot-group" ${openAttr}>
+          <summary>
+            <span>${friendly}</span>
+            <span class="badge">${entries.length}</span>
+          </summary>
+          <div class="snapshot-body">
+            ${cards}
+          </div>
+        </details>
       `;
     })
     .join("");
@@ -689,13 +763,39 @@ const renderDebug = (result, analysisId, debugImages = []) => {
   const timelineEntries = result.timeline || [];
   debugLogEl.textContent = buildDebugLog(result, timelineEntries);
 
-  renderDebugGallery(debugImages, analysisId);
+  const debugSection = result.debug || {};
+  const snapshotSource = debugSection.snapshots || {};
+  const mergedSnapshots = { ...snapshotSource };
 
+  const legacyImages =
+    debugImages.length > 0 ? debugImages : debugSection.detection_images || [];
+  if (legacyImages.length) {
+    mergedSnapshots.detector = [
+      ...(mergedSnapshots.detector || []),
+      ...legacyImages,
+    ];
+  }
+
+  renderSnapshotGroups(mergedSnapshots, analysisId);
+
+  const historySaved = result.history_saved !== false;
   if (downloadDebugLink) {
-    downloadDebugLink.href = `/api/results/${analysisId}/artifacts/debug.json`;
+    if (historySaved) {
+      downloadDebugLink.href = `/api/results/${analysisId}/artifacts/debug.json`;
+      downloadDebugLink.removeAttribute("aria-disabled");
+    } else {
+      downloadDebugLink.href = "#";
+      downloadDebugLink.setAttribute("aria-disabled", "true");
+    }
   }
   if (openResultLink) {
-    openResultLink.href = `/api/results/${analysisId}?include_debug=true`;
+    if (historySaved) {
+      openResultLink.href = `/api/results/${analysisId}?include_debug=true`;
+      openResultLink.removeAttribute("aria-disabled");
+    } else {
+      openResultLink.href = "#";
+      openResultLink.setAttribute("aria-disabled", "true");
+    }
   }
 
   debugCard.classList.remove("hidden");
@@ -703,14 +803,20 @@ const renderDebug = (result, analysisId, debugImages = []) => {
 
 const resetDebug = () => {
   debugLogEl.textContent = "Debug not enabled.";
-  debugGalleryGrid.innerHTML = "";
-  debugGalleryEmpty.classList.remove("hidden");
-  debugGalleryEmpty.textContent = "No detection snapshots generated yet.";
+  if (snapshotGroupsEl) {
+    snapshotGroupsEl.innerHTML = "";
+  }
+  if (debugSnapshotsEmptyEl) {
+    debugSnapshotsEmptyEl.classList.remove("hidden");
+    debugSnapshotsEmptyEl.textContent = "No detection snapshots generated yet.";
+  }
   if (downloadDebugLink) {
     downloadDebugLink.href = "#";
+    downloadDebugLink.setAttribute("aria-disabled", "true");
   }
   if (openResultLink) {
     openResultLink.href = "#";
+    openResultLink.setAttribute("aria-disabled", "true");
   }
   debugCard.classList.add("hidden");
 };
@@ -849,10 +955,176 @@ const handleLocate = () => {
   );
 };
 
+// History management
+const loadHistory = async () => {
+  try {
+    const response = await fetch("/api/history");
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    renderHistory(data.analyses || []);
+  } catch (error) {
+    console.error("Failed to load history:", error);
+    historyEmptyEl.textContent = "Failed to load history. Please try again.";
+    historyEmptyEl.classList.remove("hidden");
+    historyListEl.classList.add("hidden");
+  }
+};
+
+const renderHistory = (analyses) => {
+  if (!analyses || analyses.length === 0) {
+    historyEmptyEl.classList.remove("hidden");
+    historyListEl.classList.add("hidden");
+    return;
+  }
+
+  historyEmptyEl.classList.add("hidden");
+  historyListEl.classList.remove("hidden");
+
+  historyListEl.innerHTML = "";
+
+  analyses.forEach((analysis) => {
+    const li = document.createElement("li");
+    li.className = "history-item";
+
+    const date = new Date(analysis.timestamp_parsed);
+    const dateStr = date.toLocaleDateString();
+    const timeStr = date.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    // Get band color class
+    const bandClass = getBandColorClass(analysis.potability_score);
+
+    li.innerHTML = `
+      <div class="history-item-header">
+        <div class="history-item-title">
+          <span class="history-item-date">${dateStr} ${timeStr}</span>
+          <span class="history-item-scene">${analysis.scene}</span>
+        </div>
+        <div class="history-item-actions">
+          <button type="button" class="btn-icon" onclick="loadAnalysis('${
+            analysis.analysis_id
+          }')" title="Load analysis">
+            📄
+          </button>
+          <button type="button" class="btn-icon" onclick="deleteAnalysis('${
+            analysis.analysis_id
+          }')" title="Delete analysis">
+            🗑️
+          </button>
+        </div>
+      </div>
+      <div class="history-item-details">
+        <div class="history-item-score ${bandClass}">
+          ${analysis.potability_score}% ${analysis.band_label}
+        </div>
+        <div class="history-item-meta">
+          <span>Confidence: ${analysis.confidence_score}%</span>
+          <span>${analysis.media_count} media file${
+      analysis.media_count !== 1 ? "s" : ""
+    }</span>
+          ${
+            analysis.debug_available
+              ? '<span class="debug-badge">Debug</span>'
+              : ""
+          }
+        </div>
+        ${
+          analysis.description
+            ? `<div class="history-item-description">${analysis.description.substring(
+                0,
+                100
+              )}${analysis.description.length > 100 ? "..." : ""}</div>`
+            : ""
+        }
+      </div>
+    `;
+
+    historyListEl.appendChild(li);
+  });
+};
+
+const getBandColorClass = (score) => {
+  if (score >= 100) return "score-drinkable";
+  if (score >= 51) return "score-very-clean";
+  if (score >= 50) return "score-clean";
+  if (score >= 26) return "score-less-clean";
+  return "score-unclean";
+};
+
+const loadAnalysis = async (analysisId) => {
+  try {
+    const response = await fetch(
+      `/api/results/${analysisId}?include_debug=true`
+    );
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    // Reset the form and clear current analysis
+    handleReset();
+
+    // Render the loaded results
+    renderResults(result);
+
+    // Show results card
+    resultsCard.classList.remove("hidden");
+
+    // If debug data is available, show it
+    if (result.debug) {
+      renderDebug(result.debug);
+    }
+
+    // Update analysis ID display
+    analysisIdEl.textContent = `Loaded: ${analysisId}`;
+  } catch (error) {
+    console.error("Failed to load analysis:", error);
+    alert("Failed to load analysis. Please try again.");
+  }
+};
+
+const deleteAnalysis = async (analysisId) => {
+  if (
+    !confirm(
+      "Are you sure you want to delete this analysis? This action cannot be undone."
+    )
+  ) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/history/${analysisId}`, {
+      method: "DELETE",
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    // Refresh the history list
+    await loadHistory();
+  } catch (error) {
+    console.error("Failed to delete analysis:", error);
+    alert("Failed to delete analysis. Please try again.");
+  }
+};
+
+const refreshHistory = () => {
+  loadHistory();
+};
+
 form?.addEventListener("submit", handleSubmit);
 form?.addEventListener("reset", handleReset);
 locateBtn?.addEventListener("click", handleLocate);
+refreshHistoryBtn?.addEventListener("click", refreshHistory);
 
 // Initialize default state
 clearTimeline();
 resetDebug();
+loadHistory(); // Load history on page load

@@ -13,6 +13,11 @@
         Local-first water safety insights powered by computer vision and
         regional data.
       </p>
+      <div style="margin-top: 16px">
+        <a href="/model-lab" class="btn ghost" style="text-decoration: none">
+          🔬 Model Lab
+        </a>
+      </div>
     </header>
 
     <main id="layout">
@@ -37,7 +42,7 @@
           </label>
 
           <label class="field">
-            <span class="label">Observation notes</span>
+            <span class="label">Observation notes (Optional)</span>
             <textarea
               id="description"
               name="description"
@@ -73,6 +78,13 @@
             >
           </label>
 
+          <label class="checkbox">
+            <input type="checkbox" id="dont-save" name="dont_save" />
+            <span>
+              Don't save this analysis to history (debug snapshots disabled)
+            </span>
+          </label>
+
           <div class="actions">
             <button type="submit" id="analyze-btn">Analyze</button>
             <button type="reset" id="reset-btn">Clear</button>
@@ -81,7 +93,7 @@
 
         <div class="disclaimer">
           HydroScan provides informational analysis only and is not a substitute
-          for laboratory testing or public health advice.
+          for laboratory testing or public health advice. This is a prototype.
         </div>
       </section>
 
@@ -99,6 +111,19 @@
             </div>
           </li>
         </ul>
+      </section>
+
+      <section class="card history-card" id="history-card">
+        <div class="card-header">
+          <h2>Recent analyses</h2>
+          <button type="button" class="ghost" id="refresh-history">
+            Refresh
+          </button>
+        </div>
+        <p class="history-empty" id="history-empty">
+          History is empty. Analyses saved to disk will appear here.
+        </p>
+        <ul class="history-list" id="history-list"></ul>
       </section>
 
       <section class="card results-card hidden" id="results-card">
@@ -158,12 +183,12 @@
         </div>
         <pre class="debug-log" id="debug-log">Debug not enabled.</pre>
 
-        <div class="debug-gallery" id="debug-gallery">
+        <div class="debug-snapshots" id="debug-snapshots">
           <h3>Detection snapshots</h3>
-          <p class="empty" id="debug-gallery-empty">
+          <p class="empty" id="debug-snapshots-empty">
             No detection snapshots generated yet.
           </p>
-          <div class="gallery-grid" id="debug-gallery-grid"></div>
+          <div class="snapshot-groups" id="snapshot-groups"></div>
         </div>
       </section>
     </main>

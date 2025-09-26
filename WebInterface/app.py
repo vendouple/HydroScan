@@ -39,10 +39,8 @@ def create_app() -> FastAPI:
         from WebInterface.backend.Adapters.Place365 import Place365Adapter
 
         _ = RFDETRAdapter()
-        custom_weights = os.path.join(MODELS_DIR, "CustomModel", "ObjectDetection.pt")
-        _ = InModelAdapter(
-            weights_path=custom_weights if os.path.exists(custom_weights) else None
-        )
+        # InModel adapter now uses models_dir and looks for InHouse models automatically
+        _ = InModelAdapter(models_dir=MODELS_DIR)
         _ = Place365Adapter(models_dir=MODELS_DIR)
         print("[HydroScan] Models initialized (RT-DETR, InModel, Places365)")
     except Exception as e:
@@ -62,12 +60,17 @@ def create_app() -> FastAPI:
     def index(request: Request):
         return templates.TemplateResponse("index.html", {"request": request})
 
+    @app.get("/model-lab", response_class=HTMLResponse)
+    def model_lab(request: Request):
+        return templates.TemplateResponse("model-lab.html", {"request": request})
+
     try:
-        from WebInterface.API import analyze, models, results  # noqa: F401
+        from WebInterface.API import analyze, models, results, model_test  # noqa: F401
 
         app.include_router(analyze.router, prefix="/api")
         app.include_router(results.router, prefix="/api")
         app.include_router(models.router, prefix="/api")
+        app.include_router(model_test.router, prefix="/api")
     except Exception as e:
         print(f"[HydroScan] Router include skipped: {e}")
 

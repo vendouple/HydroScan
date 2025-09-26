@@ -3,13 +3,17 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import tempfile
 import uuid
-from collections import Counter
+from collections import Counter, defaultdict
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 try:
@@ -32,7 +36,10 @@ from WebInterface.backend.Adapters.InModel import InModelAdapter
 from WebInterface.backend.Ingestion.indonesia.fetch_data import fetch_nearest_station
 from WebInterface.backend.Ingestion.indonesia.normalize import normalize_external
 from WebInterface.backend.Processing.aggregator import aggregate
-from WebInterface.backend.Processing.filters import generate_variants
+from WebInterface.backend.Processing.filters import (
+    generate_variants,
+    get_filter_display_name,
+)
 from WebInterface.backend.Processing.visual_metrics import compute_visual_metrics
 from WebInterface.backend.Scoring.scoring import compute_scores
 
@@ -48,6 +55,76 @@ MAX_VARIANTS = 6
 SCENE_SAMPLE_FRAMES = 3
 DETECTOR_THRESHOLD = float(os.environ.get("HYDROSCAN_DETECT_THRESHOLD", "0.4"))
 MAX_DEBUG_IMAGES = int(os.environ.get("HYDROSCAN_DEBUG_MAX_IMAGES", "24"))
+MAX_FRAMES_PER_VIDEO = int(os.environ.get("HYDROSCAN_MAX_FRAMES_PER_VIDEO", "250"))
+FRAME_DIFF_THRESHOLD = float(os.environ.get("HYDROSCAN_FRAME_DIFF_THRESHOLD", "18.0"))
+TOP_DETECTION_TARGET = float(os.environ.get("HYDROSCAN_TOP_DETECTION_TARGET", "0.6"))
+MIN_DETECTIONS_REQUIRED = int(os.environ.get("HYDROSCAN_MIN_DETECTIONS", "1"))
+
+DEBUG_SNAPSHOT_CATEGORIES = ("scene", "filters", "detector", "ocr")
+KNOWN_WATER_BRANDS = {
+    "aqua",
+    "ades",
+    "cleo",
+    "club",
+    "dasani",
+    "evian",
+    "nestle",
+    "voss",
+    "volvic",
+}
+PACKAGING_KEYWORDS = [
+    "bottle",
+    "bottled",
+    "pack",
+    "package",
+    "packaging",
+    "can",
+    "cup",
+    "label",
+    "logo",
+    "brand",
+]
+WATER_KEYWORDS = [
+    "water",
+    "liquid",
+    "drink",
+    "glass",
+    "cup",
+    "river",
+    "lake",
+    "stream",
+]
+
+
+def _contains_water_keyword(name: str | None) -> bool:
+    if not name:
+        return False
+    lowered = name.lower()
+    return any(keyword in lowered for keyword in WATER_KEYWORDS)
+
+
+def _append_timeline(
+    timeline: List[Dict[str, Any]],
+    step: str,
+    status: str,
+    detail: str,
+    progress: Optional[int] = None,
+    total_steps: Optional[int] = None,
+) -> None:
+    entry = {
+        "step": step,
+        "status": status,
+        "detail": detail,
+        "timestamp": datetime.now().isoformat(),
+    }
+    if progress is not None:
+        entry["progress"] = progress
+    if total_steps is not None:
+        entry["total_steps"] = total_steps
+        entry["progress_percentage"] = (
+            int((progress / total_steps) * 100) if progress is not None else 0
+        )
+    timeline.append(entry)
 
 
 router = APIRouter()
@@ -96,9 +173,8 @@ def _load_inmodel_adapter() -> InModelAdapter:
             "INMODEL_CLASSIFIER",
             str(MODELS_DIR / "CustomModel" / "CLS.pt"),
         )
-        _inmodel_adapter = InModelAdapter(
-            weights_path=weights, classification_path=classifier
-        )
+        # InModel adapter now uses models_dir and looks for InHouse models automatically
+        _inmodel_adapter = InModelAdapter(models_dir=str(MODELS_DIR))
     return _inmodel_adapter
 
 
@@ -201,14 +277,16 @@ def _extract_video_duration(cap: Any) -> float:
 
 
 def _extract_frames_from_video(
-    path: Path, max_frames: int = 45
+    path: Path, max_frames: int = MAX_FRAMES_PER_VIDEO
 ) -> Sequence[Image.Image]:
     if not _HAS_CV2:
         return []
+
     frames: List[Image.Image] = []
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         return frames
+
     duration = _extract_video_duration(cap)
     if duration > MAX_VIDEO_DURATION_SECONDS:
         cap.release()
@@ -217,16 +295,44 @@ def _extract_frames_from_video(
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     if total_frames == 0:
         total_frames = int(duration * 24)  # heuristic fallback
-    step = max(1, total_frames // max_frames)
-    idx = 0
-    while cap.isOpened() and len(frames) < max_frames:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+
+    sampling_stride = max(1, total_frames // (max_frames * 2 or 1))
+    keep_interval = max(1, total_frames // max_frames) if max_frames else 1
+
+    frames_saved = 0
+    prev_gray: Optional[np.ndarray] = None
+    last_kept_idx = -keep_interval
+    frame_index = 0
+
+    while cap.isOpened() and frames_saved < max_frames:
         ok, frame = cap.read()
         if not ok:
             break
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        frames.append(Image.fromarray(frame_rgb))
-        idx += step
+
+        if sampling_stride > 1 and frame_index % sampling_stride != 0:
+            frame_index += 1
+            continue
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        diff_score = (
+            _frame_difference_score(prev_gray, gray)
+            if prev_gray is not None
+            else FRAME_DIFF_THRESHOLD + 1.0
+        )
+
+        if (
+            prev_gray is None
+            or diff_score >= FRAME_DIFF_THRESHOLD
+            or (frame_index - last_kept_idx) >= keep_interval
+        ):
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frames.append(Image.fromarray(frame_rgb))
+            frames_saved += 1
+            prev_gray = gray
+            last_kept_idx = frame_index
+
+        frame_index += 1
+
     cap.release()
     return frames
 
@@ -255,15 +361,13 @@ def _serialize_for_json(data: Any) -> Any:
 def _run_detector(
     adapter: RFDETRAdapter | InModelAdapter, image: Image.Image, threshold: float
 ) -> List[Dict[str, Any]]:
-    try:
-        if isinstance(adapter, InModelAdapter):
-            results = adapter.predict([image], conf=threshold)
-            return results[0] if results else []
-        if hasattr(adapter, "predict"):
-            return adapter.predict(image, threshold=threshold)  # type: ignore[arg-type]
-    except Exception:
-        return []
-    return []
+    if isinstance(adapter, InModelAdapter):
+        results = adapter.predict([image], conf=threshold)
+        return results[0] if results else []
+    if hasattr(adapter, "predict"):
+        detections = adapter.predict(image, threshold=threshold)  # type: ignore[arg-type]
+        return detections or []
+    raise RuntimeError("Adapter does not expose a compatible predict method")
 
 
 def _sanitize_slug(value: str) -> str:
@@ -321,6 +425,363 @@ def _annotate_detections(
     return annotated
 
 
+def _frame_difference_score(prev_gray: np.ndarray, current_gray: np.ndarray) -> float:
+    if prev_gray.shape != current_gray.shape:
+        current_gray = cv2.resize(
+            current_gray, (prev_gray.shape[1], prev_gray.shape[0])
+        )
+    diff = np.abs(prev_gray.astype(np.float32) - current_gray.astype(np.float32))
+    return float(diff.mean())
+
+
+def _create_debug_context(
+    debug_enabled: bool, base_dir: Optional[Path]
+) -> Dict[str, Any]:
+    manifest = {category: [] for category in DEBUG_SNAPSHOT_CATEGORIES}
+    dirs: Dict[str, Optional[Path]] = {}
+    counts: defaultdict[str, int] = defaultdict(int)
+    enabled = debug_enabled and base_dir is not None
+
+    if enabled and base_dir is not None:
+        base_dir.mkdir(parents=True, exist_ok=True)
+        for category in DEBUG_SNAPSHOT_CATEGORIES:
+            category_dir = base_dir / category
+            category_dir.mkdir(parents=True, exist_ok=True)
+            dirs[category] = category_dir
+    else:
+        for category in DEBUG_SNAPSHOT_CATEGORIES:
+            dirs[category] = None
+
+    return {
+        "enabled": enabled,
+        "base_dir": base_dir,
+        "dirs": dirs,
+        "manifest": manifest,
+        "counts": counts,
+        "limit": MAX_DEBUG_IMAGES,
+        "filter_saved_ops": set(),
+        "scene_saved_indices": set(),
+        "detector_failure_ops": set(),
+        "errors": {"detector": []},
+    }
+
+
+def _save_debug_snapshot(
+    context: Dict[str, Any],
+    category: str,
+    image: Image.Image,
+    filename: str,
+    metadata: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    if not context.get("enabled"):
+        return None
+
+    if category not in DEBUG_SNAPSHOT_CATEGORIES:
+        return None
+
+    if context["counts"][category] >= context["limit"]:
+        return None
+
+    target_dir: Optional[Path] = context["dirs"].get(category)
+    if target_dir is None:
+        return None
+
+    target_path = target_dir / filename
+    try:
+        image.save(target_path, format="JPEG", quality=90)
+    except Exception:
+        return None
+
+    rel_path = f"{category}/{filename}"
+    entry = {
+        **metadata,
+        "relative_path": rel_path,
+        "filename": filename,
+        "category": category,
+    }
+    context["manifest"][category].append(entry)
+    context["counts"][category] += 1
+    return entry
+
+
+def _evaluate_detection_confidence(aggregation: Dict[str, Any]) -> Tuple[int, float]:
+    detections = aggregation.get("detections", []) or []
+    top = aggregation.get("top_detection") or {}
+    top_score = float(top.get("score", 0.0) or 0.0)
+    return len(detections), top_score
+
+
+def _analyze_packaging(aggregation: Dict[str, Any]) -> Dict[str, Any]:
+    detections: List[Dict[str, Any]] = aggregation.get("detections", []) or []
+    packaging_hits: List[Dict[str, Any]] = []
+    detected_brand: Optional[str] = None
+    non_water_brand: Optional[str] = None
+
+    for det in detections:
+        name = (det.get("class_name") or "").lower()
+        if not name:
+            continue
+        if any(keyword in name for keyword in PACKAGING_KEYWORDS):
+            packaging_hits.append(det)
+            for water_brand in KNOWN_WATER_BRANDS:
+                if water_brand in name:
+                    detected_brand = water_brand
+                    break
+            else:
+                non_water_brand = name
+
+    water_visible = any(
+        "water" in (det.get("class_name") or "").lower() for det in detections
+    )
+
+    return {
+        "packaging_present": bool(packaging_hits),
+        "brand": detected_brand,
+        "non_water_brand": non_water_brand,
+        "water_visible": water_visible,
+        "packaging_detections": packaging_hits,
+    }
+
+
+def _extract_packaging_crops(
+    frames: Sequence[Image.Image],
+    packaging_info: Dict[str, Any],
+    limit: int = 4,
+) -> List[Image.Image]:
+    crops: List[Image.Image] = []
+    if not packaging_info.get("packaging_present"):
+        return crops
+
+    for det in packaging_info.get("packaging_detections", []):
+        occurrences = det.get("occurrences") or []
+        if not occurrences:
+            continue
+        first = occurrences[0]
+        frame_index = first.get("frame_index")
+        bbox = det.get("bbox")
+        if frame_index is None or bbox is None:
+            continue
+        if frame_index < 0 or frame_index >= len(frames):
+            continue
+
+        try:
+            x1, y1, x2, y2 = [int(round(float(v))) for v in bbox]
+        except Exception:
+            continue
+
+        frame = frames[frame_index]
+        crop = frame.crop((max(0, x1), max(0, y1), max(x2, x1 + 1), max(y2, y1 + 1)))
+        crops.append(crop)
+        if len(crops) >= limit:
+            break
+
+    return crops
+
+
+def _dynamic_detection_pipeline(
+    frames: Sequence[Image.Image],
+    detector: RFDETRAdapter | InModelAdapter,
+    debug_ctx: Dict[str, Any],
+    timeline: List[Dict[str, Any]],
+) -> Tuple[
+    List[Dict[str, Any]],
+    List[Dict[str, float]],
+    Dict[str, Any],
+    Dict[str, Any],
+]:
+    if not frames:
+        empty_aggregation = aggregate([])
+        return (
+            [],
+            [],
+            empty_aggregation,
+            {
+                "applied": [],
+                "target_score": TOP_DETECTION_TARGET,
+                "min_detections": MIN_DETECTIONS_REQUIRED,
+            },
+        )
+
+    metrics_per_frame = [compute_visual_metrics(frame) for frame in frames]
+    frames_for_aggregation: List[Dict[str, Any]] = []
+
+    operations: List[str] = ["original", "auto_white_balance", "contrast_stretch"]
+    remaining_ops: List[str] = ["denoise", "sharpen", "gamma_1.2", "deglare"]
+    processed_ops: set[str] = set()
+    applied_ops: List[str] = []
+
+    friendly_initial = ", ".join(get_filter_display_name(op) for op in operations)
+    _append_timeline(
+        timeline,
+        "filter_strategy",
+        "in-progress",
+        f"Initial filters: {friendly_initial}",
+    )
+    _append_timeline(
+        timeline,
+        "detector_inference",
+        "in-progress",
+        "Running detection pipeline",
+    )
+
+    while True:
+        progress_made = False
+        for op in operations:
+            if op in processed_ops:
+                continue
+            progress_made = True
+            applied_ops.append(op)
+            friendly_name = get_filter_display_name(op)
+            if op != "original":
+                _append_timeline(
+                    timeline,
+                    "filter_strategy",
+                    "in-progress",
+                    f"Applying {friendly_name}",
+                )
+
+            for idx, frame in enumerate(frames):
+                if op == "original":
+                    variant_img = frame.convert("RGB")
+                    metrics = metrics_per_frame[idx]
+                else:
+                    variants = generate_variants(
+                        frame,
+                        max_variants=1,
+                        operations=[op],
+                        include_original=False,
+                    )
+                    if not variants:
+                        continue
+                    variant_img = variants[0][1]
+                    metrics = compute_visual_metrics(variant_img)
+
+                try:
+                    detections = _run_detector(
+                        detector, variant_img, DETECTOR_THRESHOLD
+                    )
+                except Exception as exc:
+                    detail = f"{friendly_name} failed for frame {idx}: {exc}"
+                    if op not in debug_ctx["detector_failure_ops"]:
+                        _append_timeline(
+                            timeline,
+                            "detector_inference",
+                            "warning",
+                            detail,
+                        )
+                        debug_ctx["detector_failure_ops"].add(op)
+                    if debug_ctx.get("enabled"):
+                        debug_ctx["errors"]["detector"].append(
+                            {
+                                "variant": op,
+                                "frame_index": idx,
+                                "error": str(exc),
+                                "traceback": traceback.format_exc(),
+                            }
+                        )
+                    continue
+
+                if (
+                    debug_ctx.get("enabled")
+                    and op != "original"
+                    and op not in debug_ctx["filter_saved_ops"]
+                ):
+                    filename = f"filter_{_sanitize_slug(op)}.jpg"
+                    saved = _save_debug_snapshot(
+                        debug_ctx,
+                        "filters",
+                        variant_img,
+                        filename,
+                        {
+                            "variant": op,
+                            "label": friendly_name,
+                        },
+                    )
+                    if saved:
+                        debug_ctx["filter_saved_ops"].add(op)
+
+                debug_image_rel_path: Optional[str] = None
+                if debug_ctx.get("enabled") and detections:
+                    filename = f"frame{idx:03d}_{_sanitize_slug(op)}.jpg"
+                    annotated = _annotate_detections(variant_img, detections)
+                    saved = _save_debug_snapshot(
+                        debug_ctx,
+                        "detector",
+                        annotated,
+                        filename,
+                        {
+                            "frame_index": idx,
+                            "variant": op,
+                            "detections": len(detections),
+                        },
+                    )
+                    if saved:
+                        debug_image_rel_path = saved["relative_path"]
+
+                frames_for_aggregation.append(
+                    {
+                        "frame_index": idx,
+                        "variant": op,
+                        "metrics": metrics,
+                        "detections": detections,
+                        "debug_image": debug_image_rel_path,
+                    }
+                )
+
+            processed_ops.add(op)
+
+        aggregation_result = aggregate(frames_for_aggregation)
+        detection_count, top_score = _evaluate_detection_confidence(aggregation_result)
+
+        if (
+            detection_count >= MIN_DETECTIONS_REQUIRED
+            and top_score >= TOP_DETECTION_TARGET
+        ):
+            _append_timeline(
+                timeline,
+                "detector_inference",
+                "done",
+                f"Detections={detection_count}, top={top_score:.2f}",
+            )
+            break
+
+        if not remaining_ops:
+            status = "warning" if detection_count == 0 else "in-progress"
+            _append_timeline(
+                timeline,
+                "detector_inference",
+                status,
+                f"Detections={detection_count}, top={top_score:.2f}",
+            )
+            break
+
+        next_op = remaining_ops.pop(0)
+        operations.append(next_op)
+        _append_timeline(
+            timeline,
+            "filter_strategy",
+            "in-progress",
+            f"Boosting confidence with {get_filter_display_name(next_op)}",
+        )
+
+        if not progress_made:
+            _append_timeline(
+                timeline,
+                "detector_inference",
+                "warning",
+                "Unable to apply additional filters",
+            )
+            break
+
+    filter_summary = {
+        "applied": applied_ops,
+        "target_score": TOP_DETECTION_TARGET,
+        "min_detections": MIN_DETECTIONS_REQUIRED,
+    }
+
+    return frames_for_aggregation, metrics_per_frame, aggregation_result, filter_summary
+
+
 @router.post("/analyze")
 async def analyze_endpoint(
     files: List[UploadFile] = File(..., description="Images and/or videos"),
@@ -330,268 +791,985 @@ async def analyze_endpoint(
     lat: Optional[float] = Form(None, description="Latitude for external data"),
     lon: Optional[float] = Form(None, description="Longitude for external data"),
     debug: bool = Form(False),
+    dont_save: bool = Form(
+        False, description="Skip persisting this analysis to history"
+    ),
 ):
     if not files:
         raise HTTPException(status_code=400, detail="No media uploaded")
 
-    images: List[Path] = []
-    videos: List[Path] = []
     if len(files) > MAX_IMAGES + MAX_VIDEOS:
         raise HTTPException(status_code=400, detail="Too many files uploaded")
 
+    image_candidates: List[UploadFile] = []
+    video_candidates: List[UploadFile] = []
     for upload in files:
         if _is_video(upload):
-            videos.append(Path(upload.filename or "video"))
+            video_candidates.append(upload)
         else:
-            images.append(Path(upload.filename or "image"))
+            image_candidates.append(upload)
 
-    if len(images) > MAX_IMAGES:
+    if len(image_candidates) > MAX_IMAGES:
         raise HTTPException(
             status_code=400, detail=f"Maximum {MAX_IMAGES} images allowed"
         )
-    if len(videos) > MAX_VIDEOS:
+    if len(video_candidates) > MAX_VIDEOS:
         raise HTTPException(
             status_code=400, detail=f"Maximum {MAX_VIDEOS} videos allowed"
         )
 
+    history_enabled = not dont_save
     analysis_id = str(uuid.uuid4())
-    target_dir = HISTORY_DIR / analysis_id
-    _ensure_history_dir(target_dir)
+    storage_dir = (
+        HISTORY_DIR / analysis_id
+        if history_enabled
+        else Path(tempfile.mkdtemp(prefix="hydroscan-"))
+    )
+    _ensure_history_dir(storage_dir)
+
+    debug_base_dir = storage_dir / "debug" if (debug and history_enabled) else None
+    debug_ctx = _create_debug_context(debug, debug_base_dir)
 
     saved_files: List[Dict[str, Any]] = []
     actual_image_paths: List[Path] = []
     actual_video_paths: List[Path] = []
-    debug_images_manifest: List[Dict[str, Any]] = []
-    debug_dir: Optional[Path] = None
-    debug_detections_dir: Optional[Path] = None
 
-    if debug:
-        debug_dir = target_dir / "debug"
-        debug_dir.mkdir(parents=True, exist_ok=True)
-        debug_detections_dir = debug_dir / "detections"
-        debug_detections_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        for upload in files:
+            dest = await _save_upload(upload, storage_dir)
+            record = {
+                "filename": upload.filename,
+                "content_type": upload.content_type,
+                "path": str(dest),
+            }
+            saved_files.append(record)
+            if _is_video(upload):
+                actual_video_paths.append(dest)
+            else:
+                actual_image_paths.append(dest)
+            await upload.close()
 
-    for upload in files:
-        dest = await _save_upload(upload, target_dir)
-        record = {
-            "filename": upload.filename,
-            "content_type": upload.content_type,
-            "path": str(dest),
-        }
-        saved_files.append(record)
-        if _is_video(upload):
-            actual_video_paths.append(dest)
-        else:
-            actual_image_paths.append(dest)
-        await upload.close()
-
-    frames: List[Image.Image] = []
-    metrics_per_frame: List[Dict[str, float]] = []
-    timeline: List[Dict[str, Any]] = []
-    detector = _select_detector_adapter()
-    place365 = _load_place_adapter()
-
-    timeline.append(
-        {
-            "step": "preparing_media",
-            "status": "in-progress",
-            "detail": f"{len(actual_image_paths)} images, {len(actual_video_paths)} videos",
-        }
-    )
-
-    for img_path in actual_image_paths:
-        frames.append(_load_image(img_path))
-
-    for video_path in actual_video_paths:
-        try:
-            video_frames = _extract_frames_from_video(video_path)
-            frames.extend(video_frames)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-
-    if not frames:
-        raise HTTPException(
-            status_code=400, detail="Unable to decode any frames from uploads"
+        timeline: List[Dict[str, Any]] = []
+        _append_timeline(
+            timeline,
+            "preparing_media",
+            "in-progress",
+            f"{len(actual_image_paths)} images, {len(actual_video_paths)} videos",
         )
 
-    timeline.append(
-        {
-            "step": "preparing_media",
-            "status": "done",
-            "detail": f"Total frames for analysis: {len(frames)}",
-        }
-    )
+        frames: List[Image.Image] = []
+        for img_path in actual_image_paths:
+            frames.append(_load_image(img_path))
 
-    sampled_scene_frames = frames[:SCENE_SAMPLE_FRAMES]
-    scene_results = [place365.classify(frame) for frame in sampled_scene_frames]
-    scene_labels = [res.get("scene", "unknown") for res in scene_results]
-    scene_majority = _majority_vote(scene_labels)
-    mean_scene_conf = (
-        sum(res.get("confidence", 0.0) for res in scene_results) / len(scene_results)
-        if scene_results
-        else 0.0
-    )
-    timeline.append(
-        {
-            "step": "scene_classifier",
-            "status": "done",
-            "detail": f"scene={scene_majority} ({mean_scene_conf:.2f})",
-        }
-    )
+        for video_path in actual_video_paths:
+            try:
+                video_frames = _extract_frames_from_video(video_path)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            frames.extend(video_frames)
 
-    frames_for_aggregation: List[Dict[str, Any]] = []
-    total_variants = 0
+        if not frames:
+            raise HTTPException(
+                status_code=400, detail="Unable to decode any frames from uploads"
+            )
 
-    timeline.append({"step": "applying_filters", "status": "in-progress"})
-    for idx, frame in enumerate(frames):
-        variants = generate_variants(frame, max_variants=MAX_VARIANTS)
-        total_variants += len(variants)
-        original_metrics = compute_visual_metrics(frame)
-        metrics_per_frame.append(original_metrics)
-        for variant_name, variant_img in variants:
-            metrics = compute_visual_metrics(variant_img)
-            detections = _run_detector(detector, variant_img, DETECTOR_THRESHOLD)
-            if not detections and detector.model is None:
-                timeline.append(
-                    {
-                        "step": "running_detector",
-                        "status": "warning",
-                        "detail": "Detector model unavailable",
-                    }
+        _append_timeline(
+            timeline,
+            "preparing_media",
+            "done",
+            f"Frames retained: {len(frames)}",
+            progress=1,
+            total_steps=8,
+        )
+
+        # Enhanced Scene Detection with Filter Stack
+        _append_timeline(
+            timeline,
+            "scene_detection",
+            "in-progress",
+            "🔍 Applying filter stack for better scene analysis...",
+            progress=2,
+            total_steps=8,
+        )
+
+        place365 = _load_place_adapter()
+        sampled_scene_frames = frames[:SCENE_SAMPLE_FRAMES] or frames[:1]
+
+        # Apply filter variants to improve scene detection accuracy
+        scene_results_all = []
+        best_scene_results = []
+
+        for i, frame in enumerate(sampled_scene_frames):
+            _append_timeline(
+                timeline,
+                "scene_detection",
+                "in-progress",
+                f"🎛️ Generating filter variants for frame {i+1}/{len(sampled_scene_frames)}...",
+                progress=2,
+                total_steps=8,
+            )
+
+            # Generate filter variants for better scene analysis
+            filter_variants = generate_variants(
+                frame,
+                max_variants=4,  # Keep reasonable for scene detection
+                operations=[
+                    "original",
+                    "auto_white_balance",
+                    "contrast_stretch",
+                    "gamma_adaptive",
+                ],
+                include_original=True,
+            )
+
+            frame_results = []
+            for filter_name, variant_frame in filter_variants:
+                _append_timeline(
+                    timeline,
+                    "scene_detection",
+                    "in-progress",
+                    f"📊 Analyzing with {get_filter_display_name(filter_name)}...",
+                    progress=2,
+                    total_steps=8,
+                )
+                result = place365.classify(variant_frame)
+                result["filter_applied"] = filter_name
+                result["filter_display"] = get_filter_display_name(filter_name)
+                frame_results.append(result)
+                scene_results_all.append(result)
+
+            # Select best result for this frame (highest confidence)
+            best_result = max(frame_results, key=lambda x: x.get("confidence", 0.0))
+            best_scene_results.append(best_result)
+
+            _append_timeline(
+                timeline,
+                "scene_detection",
+                "in-progress",
+                f"✅ Best for frame {i+1}: {best_result.get('scene', 'unknown')} "
+                f"({best_result.get('confidence', 0.0):.1%}) via {best_result.get('filter_display', 'Original')}",
+                progress=2,
+                total_steps=8,
+            )
+
+        # Determine scene with 50% confidence threshold
+        scene_labels = [res.get("scene", "unknown") for res in best_scene_results]
+        scene_confidences = [res.get("confidence", 0.0) for res in best_scene_results]
+        scene_majority = _majority_vote(scene_labels)
+        mean_scene_conf = (
+            sum(scene_confidences) / len(scene_confidences)
+            if scene_confidences
+            else 0.0
+        )
+
+        # Apply 50% confidence threshold
+        confident_outdoor = mean_scene_conf >= 0.5 and scene_majority == "outdoor"
+        confident_indoor = mean_scene_conf >= 0.5 and scene_majority == "indoor"
+
+        if confident_outdoor:
+            final_scene = "outdoor"
+            confidence_status = "high"
+        elif confident_indoor:
+            final_scene = "indoor"
+            confidence_status = "high"
+        else:
+            # Below 50% confidence - default to indoor workflow for safety
+            final_scene = "indoor"
+            confidence_status = "low"
+            _append_timeline(
+                timeline,
+                "scene_detection",
+                "warning",
+                f"⚠️ Low confidence ({mean_scene_conf:.1%}) - defaulting to indoor workflow",
+                progress=2,
+                total_steps=8,
+            )
+
+        # Log the best filter variant used
+        best_overall = max(best_scene_results, key=lambda x: x.get("confidence", 0.0))
+        best_filter_used = best_overall.get("filter_display", "Original")
+
+        _append_timeline(
+            timeline,
+            "scene_detection",
+            "done",
+            f"🎯 Scene: {final_scene.title()} (confidence: {mean_scene_conf:.1%}, "
+            f"best filter: {best_filter_used})",
+            progress=2,
+            total_steps=8,
+        )
+
+        # Scene Routing with Enhanced Workflow Logic
+        scene_majority = final_scene  # Use the confidence-adjusted scene
+        if scene_majority == "outdoor":
+            _append_timeline(
+                timeline,
+                "scene_routing",
+                "done",
+                "🌳 Outdoor detected → Location-based data will be fetched",
+                progress=3,
+                total_steps=8,
+            )
+        elif scene_majority == "indoor":
+            _append_timeline(
+                timeline,
+                "scene_routing",
+                "done",
+                "🏠 Indoor detected → Object detection for packaging analysis",
+                progress=3,
+                total_steps=8,
+            )
+        else:
+            _append_timeline(
+                timeline,
+                "scene_routing",
+                "done",
+                "❓ Unknown scene → Using indoor workflow with water detection",
+                progress=3,
+                total_steps=8,
+            )
+
+        if debug_ctx.get("enabled"):
+            for idx, (frame, result) in enumerate(
+                zip(sampled_scene_frames, best_scene_results)
+            ):
+                label = result.get("label") or result.get("scene") or "unknown"
+                confidence = float(result.get("confidence", 0.0) or 0.0)
+                annotated = frame.convert("RGB")
+                draw = ImageDraw.Draw(annotated)
+                text = f"{label} ({confidence:.2f})"
+                try:
+                    bbox = draw.textbbox((16, 16), text)
+                except Exception:
+                    bbox = (16, 16, 16 + len(text) * 7, 36)
+                draw.rectangle(
+                    (bbox[0] - 8, bbox[1] - 8, bbox[2] + 8, bbox[3] + 8),
+                    fill=(15, 23, 42, 200),
+                )
+                draw.text((bbox[0], bbox[1]), text, fill=(240, 249, 255))
+                _save_debug_snapshot(
+                    debug_ctx,
+                    "scene",
+                    annotated,
+                    f"scene_{idx:02d}.jpg",
+                    {"frame_index": idx, "label": label, "confidence": confidence},
                 )
 
-            debug_image_rel_path: Optional[str] = None
-            if (
-                debug
-                and detections
-                and debug_detections_dir is not None
-                and len(debug_images_manifest) < MAX_DEBUG_IMAGES
-            ):
-                annotated = _annotate_detections(variant_img, detections)
-                variant_slug = _sanitize_slug(variant_name)
-                filename = f"frame{idx:03d}_{variant_slug}.jpg"
-                annotated_path = debug_detections_dir / filename
+        detector = _select_detector_adapter()
+        normalized_external: Dict[str, Any] = {}
+        external_raw: Optional[Dict[str, Any]] = None
+        packaging_info: Dict[str, Any] = {}
+        packaging_crops: List[Image.Image] = []
+        packaging_water_hits = 0
+        non_water_brand_detected = False
+
+        if scene_majority == "outdoor":
+            if lat is not None and lon is not None:
+                _append_timeline(
+                    timeline,
+                    "location_data",
+                    "in-progress",
+                    "📍 Fetching location-based water quality data...",
+                    progress=4,
+                    total_steps=8,
+                )
                 try:
-                    annotated.save(annotated_path, format="JPEG", quality=90)
-                    debug_image_rel_path = f"detections/{filename}"
-                    debug_images_manifest.append(
-                        {
-                            "frame_index": idx,
-                            "variant": variant_name,
-                            "detections": len(detections),
-                            "relative_path": debug_image_rel_path,
-                            "filename": filename,
-                        }
+                    external_raw = fetch_nearest_station(lat=lat, lon=lon)
+                    normalized_external = normalize_external(external_raw)
+                    if normalized_external:
+                        distance = normalized_external.get("distance_km")
+                        if isinstance(distance, (int, float)):
+                            distance_detail = f"{float(distance):.2f} km"
+                        else:
+                            distance_detail = "unknown distance"
+                        station_id = normalized_external.get("station_id") or "unknown"
+                        _append_timeline(
+                            timeline,
+                            "location_data",
+                            "done",
+                            f"✅ Station found: {station_id} ({distance_detail} away)",
+                            progress=4,
+                            total_steps=8,
+                        )
+                        _append_timeline(
+                            timeline,
+                            "detector_selection",
+                            "done",
+                            "🔍 Using RF-DETR detector with location data support",
+                            progress=5,
+                            total_steps=8,
+                        )
+                    else:
+                        _append_timeline(
+                            timeline,
+                            "location_data",
+                            "warning",
+                            "⚠️ No station found within range",
+                            progress=4,
+                            total_steps=8,
+                        )
+                        fallback = _load_inmodel_adapter()
+                        if fallback.model is not None:
+                            detector = fallback
+                            _append_timeline(
+                                timeline,
+                                "detector_selection",
+                                "warning",
+                                "🏠 Falling back to in-house model (no location data)",
+                                progress=5,
+                                total_steps=8,
+                            )
+                        else:
+                            _append_timeline(
+                                timeline,
+                                "outdoor_detector",
+                                "error",
+                                "In-house detector unavailable",
+                            )
+                except Exception as exc:
+                    _append_timeline(timeline, "outdoor_external", "error", str(exc))
+                    fallback = _load_inmodel_adapter()
+                    if fallback.model is not None:
+                        detector = fallback
+                        _append_timeline(
+                            timeline,
+                            "outdoor_detector",
+                            "warning",
+                            "In-house detector engaged after external data failure",
+                        )
+                    else:
+                        _append_timeline(
+                            timeline,
+                            "outdoor_detector",
+                            "error",
+                            "In-house detector unavailable",
+                        )
+            else:
+                # No location provided for outdoor scene
+                _append_timeline(
+                    timeline,
+                    "location_data",
+                    "warning",
+                    "📍 Location not provided → Cannot fetch location-based data",
+                    progress=4,
+                    total_steps=8,
+                )
+                fallback = _load_inmodel_adapter()
+                if fallback.model is not None:
+                    detector = fallback
+                    _append_timeline(
+                        timeline,
+                        "detector_selection",
+                        "warning",
+                        "🏠 Using in-house detector (no location data available)",
+                        progress=5,
+                        total_steps=8,
                     )
-                except Exception:
-                    pass
-
-            frames_for_aggregation.append(
-                {
-                    "frame_index": idx,
-                    "variant": variant_name,
-                    "metrics": metrics,
-                    "detections": detections,
-                    "debug_image": debug_image_rel_path,
-                }
+                else:
+                    _append_timeline(
+                        timeline,
+                        "detector_selection",
+                        "error",
+                        "❌ In-house detector unavailable",
+                        progress=5,
+                        total_steps=8,
+                    )
+        else:
+            # Enhanced Indoor/Unknown Workflow
+            _append_timeline(
+                timeline,
+                "object_detection",
+                "in-progress",
+                "🔍 Running object detection model...",
+                progress=4,
+                total_steps=8,
             )
 
-    aggregation_result = aggregate(frames_for_aggregation)
-    timeline.append(
-        {
-            "step": "applying_filters",
-            "status": "done",
-            "detail": f"variants={total_variants}",
-        }
-    )
+        # Run detection pipeline
+        (
+            frames_for_aggregation,
+            metrics_per_frame,
+            aggregation_result,
+            filter_summary,
+        ) = _dynamic_detection_pipeline(frames, detector, debug_ctx, timeline)
 
-    aggregated_detections = aggregation_result.get("detections", [])
-    top_detection = aggregation_result.get("top_detection")
-    detection_detail = f"Detections={len(aggregated_detections)}" + (
-        f", top={top_detection.get('class_name')} ({top_detection.get('score', 0.0):.2f})"
-        if top_detection
-        else ""
-    )
-    timeline.append(
-        {
-            "step": "running_detector",
-            "status": "done" if aggregated_detections else "warning",
-            "detail": detection_detail,
-        }
-    )
-    timeline.append(
-        {
-            "step": "aggregating_results",
-            "status": "done",
-            "detail": f"metrics={len(aggregation_result.get('metrics_avg', {}))}",
-        }
-    )
-    water_detection_message = (
-        "Water wasn't detected in the provided media. "
-        "Please upload clearer samples or ensure water regions are visible."
-    )
+        friendly_filters = ", ".join(
+            get_filter_display_name(op) for op in filter_summary.get("applied", [])
+        )
+        if friendly_filters:
+            _append_timeline(
+                timeline,
+                "adaptive_filters",
+                "done",
+                f"🎛️ Applied filters: {friendly_filters}",
+                progress=5,
+                total_steps=8,
+            )
 
-    media_info = {
-        "media_count": len(actual_image_paths) + len(actual_video_paths),
-        "variant_count": total_variants,
-        "frame_count": len(frames),
-    }
+        aggregated_detections = aggregation_result.get("detections", []) or []
+        top_detection = aggregation_result.get("top_detection")
+        detection_detail = f"Found {len(aggregated_detections)} object(s)"
+        if top_detection:
+            detection_detail += f" → Top: {top_detection.get('class_name')} ({float(top_detection.get('score', 0.0)):.1%})"
 
-    if not aggregated_detections:
-        timeline.append(
-            {
-                "step": "running_detector",
-                "status": "error",
-                "detail": water_detection_message,
-            }
+        _append_timeline(
+            timeline,
+            "object_detection",
+            "done",
+            detection_detail,
+            progress=6,
+            total_steps=8,
         )
 
-        timeline.append(
-            {
-                "step": "finalizing",
-                "status": "in-progress",
-                "detail": "Preparing no-detection response",
-            }
-        )
+        # Enhanced Indoor Workflow Logic
+        if scene_majority != "outdoor":
+            packaging_info = _analyze_packaging(aggregation_result)
 
-        user_analysis: Optional[Dict[str, Any]] = None
-        assessment: Optional[UserInputAssessment] = None
-        if description:
-            timeline.append(
-                {
-                    "step": "user_input_analysis",
-                    "status": "in-progress",
-                    "detail": "Assessing user notes with LLaMA 3",
-                }
+            # Check for recognizable branded packaging
+            if packaging_info.get("packaging_present"):
+                _append_timeline(
+                    timeline,
+                    "packaging_analysis",
+                    "done",
+                    f"📦 Packaging detected: {len(packaging_info['packaging_detections'])} items",
+                    progress=6,
+                    total_steps=8,
+                )
+
+                detected_brand = packaging_info.get("brand")
+                non_water_brand = packaging_info.get("non_water_brand")
+
+                if detected_brand:
+                    # Recognizable water brand found
+                    _append_timeline(
+                        timeline,
+                        "brand_ocr",
+                        "done",
+                        f"💧 Water brand detected: {detected_brand.title()}",
+                        progress=7,
+                        total_steps=8,
+                    )
+                    # TODO: Fetch brand quality data if available
+
+                elif non_water_brand and not _contains_water_keyword(non_water_brand):
+                    # Non-water brand detected - error case
+                    non_water_brand_detected = True
+                    _append_timeline(
+                        timeline,
+                        "brand_ocr",
+                        "error",
+                        f"❌ Non-water brand detected: {non_water_brand}",
+                        progress=7,
+                        total_steps=8,
+                    )
+
+                else:
+                    # Brand unknown - crop to water area if transparent
+                    _append_timeline(
+                        timeline,
+                        "brand_ocr",
+                        "warning",
+                        "❓ Brand unknown → Isolating liquid area in packaging",
+                        progress=7,
+                        total_steps=8,
+                    )
+
+                    packaging_crops = _extract_packaging_crops(frames, packaging_info)
+                    if packaging_crops and debug_ctx.get("enabled"):
+                        for idx, crop in enumerate(packaging_crops):
+                            _save_debug_snapshot(
+                                debug_ctx,
+                                "ocr",
+                                crop,
+                                f"packaging_crop_{idx:02d}.jpg",
+                                {"crop_index": idx, "source": "packaging_isolation"},
+                            )
+
+                    if packaging_crops:
+                        _append_timeline(
+                            timeline,
+                            "liquid_isolation",
+                            "in-progress",
+                            "🔬 Analyzing isolated liquid area with in-house model...",
+                            progress=7,
+                            total_steps=8,
+                        )
+
+                        fallback_detector = _load_inmodel_adapter()
+                        if fallback_detector.model is not None:
+                            crop_results = fallback_detector.predict(
+                                list(packaging_crops), conf=DETECTOR_THRESHOLD
+                            )
+                            for crop_det in crop_results:
+                                if any(
+                                    _contains_water_keyword(det.get("class_name"))
+                                    for det in crop_det
+                                ):
+                                    packaging_water_hits += 1
+
+                            if packaging_water_hits:
+                                _append_timeline(
+                                    timeline,
+                                    "liquid_isolation",
+                                    "done",
+                                    f"✅ Water detected in {packaging_water_hits} packaging crop(s)",
+                                    progress=8,
+                                    total_steps=8,
+                                )
+                            else:
+                                _append_timeline(
+                                    timeline,
+                                    "liquid_isolation",
+                                    "warning",
+                                    "⚠️ Liquid not clearly visible in packaging",
+                                    progress=8,
+                                    total_steps=8,
+                                )
+                    else:
+                        _append_timeline(
+                            timeline,
+                            "liquid_isolation",
+                            "error",
+                            "❌ Cannot isolate liquid area from packaging",
+                            progress=7,
+                            total_steps=8,
+                        )
+
+            else:
+                # No packaging detected - try direct water detection
+                _append_timeline(
+                    timeline,
+                    "packaging_analysis",
+                    "warning",
+                    "📦 No recognizable packaging found",
+                    progress=6,
+                    total_steps=8,
+                )
+
+                # Try to detect water directly in the images/video frames
+                water_detections = [
+                    det
+                    for det in aggregated_detections
+                    if _contains_water_keyword(det.get("class_name", ""))
+                ]
+
+                if water_detections:
+                    _append_timeline(
+                        timeline,
+                        "direct_water_detection",
+                        "done",
+                        f"💧 Water detected directly in {len(water_detections)} detection(s)",
+                        progress=8,
+                        total_steps=8,
+                    )
+                else:
+                    _append_timeline(
+                        timeline,
+                        "direct_water_detection",
+                        "error",
+                        "❌ No water detected in provided images/video",
+                        progress=8,
+                        total_steps=8,
+                    )
+
+        # Get detailed In House Model predictions with bounding boxes
+        inhouse_predictions = []
+        inhouse_adapter = _load_inmodel_adapter()
+        if inhouse_adapter.model is not None:
+            _append_timeline(
+                timeline,
+                "inhouse_analysis",
+                "in-progress",
+                "🤖 Running In House Model for detailed predictions...",
+                progress=7,
+                total_steps=8,
             )
-            _, _, assessment, user_analysis = _prepare_user_input_analysis(
-                description,
-                scene_majority,
-                aggregation_result,
-                {},
-                metrics_per_frame,
-                media_info,
-            )
-            if assessment and assessment.available:
-                timeline.append(
-                    {
-                        "step": "user_input_analysis",
-                        "status": "done",
-                        "detail": f"LLM confidence {assessment.confidence:.0f}%",
-                    }
+
+            try:
+                # Run comprehensive predictions on representative frames
+                prediction_frames = frames[:3] if len(frames) > 3 else frames
+
+                # Run traditional prediction for compatibility
+                frame_predictions = inhouse_adapter.predict(
+                    prediction_frames, conf=DETECTOR_THRESHOLD
+                )
+
+                for frame_idx, predictions in enumerate(frame_predictions):
+                    for pred in predictions:
+                        pred_with_frame = pred.copy()
+                        pred_with_frame["frame_index"] = frame_idx
+                        inhouse_predictions.append(pred_with_frame)
+
+                # Run comprehensive YOLOv11 predictions with OBB and classification
+                for frame_idx, frame in enumerate(prediction_frames):
+                    try:
+                        comprehensive_results = inhouse_adapter.predict_comprehensive(
+                            frame, conf=DETECTOR_THRESHOLD
+                        )
+
+                        # Add OBB detections
+                        for obb_detection in comprehensive_results.get(
+                            "obb_detections", []
+                        ):
+                            obb_detection["frame_index"] = frame_idx
+                            obb_detection["detection_type"] = "obb"
+                            inhouse_predictions.append(obb_detection)
+
+                        # Add classification results
+                        for classification in comprehensive_results.get(
+                            "classifications", []
+                        ):
+                            classification["frame_index"] = frame_idx
+                            classification["detection_type"] = "classification"
+                            inhouse_predictions.append(classification)
+
+                    except Exception as comp_e:
+                        print(
+                            f"[HydroScan] Comprehensive prediction error for frame {frame_idx}: {comp_e}"
+                        )
+
+                _append_timeline(
+                    timeline,
+                    "inhouse_analysis",
+                    "done",
+                    f"🤖 In House Model: {len(inhouse_predictions)} predictions across {len(prediction_frames)} frames",
+                    progress=7,
+                    total_steps=8,
+                )
+
+            except Exception as e:
+                _append_timeline(
+                    timeline,
+                    "inhouse_analysis",
+                    "warning",
+                    f"⚠️ In House Model error: {str(e)}",
+                    progress=7,
+                    total_steps=8,
+                )
+
+        # Water confirmation logic (applies to all scenarios)
+        if scene_majority == "outdoor":
+            total_detections = len(aggregated_detections) + len(inhouse_predictions)
+            if aggregated_detections or inhouse_predictions:
+                _append_timeline(
+                    timeline,
+                    "water_confirmation",
+                    "done",
+                    f"Detector observed {total_detections} detection(s) outdoors",
                 )
             else:
-                timeline.append(
-                    {
-                        "step": "user_input_analysis",
-                        "status": "warning",
-                        "detail": (
+                _append_timeline(
+                    timeline,
+                    "water_confirmation",
+                    "warning",
+                    "Detector did not observe water cues outdoors",
+                )
+
+        water_detected = any(
+            _contains_water_keyword(det.get("class_name"))
+            for det in aggregated_detections
+        )
+
+        # Also check inhouse predictions for water-related detections
+        if inhouse_predictions:
+            water_detected = water_detected or any(
+                _contains_water_keyword(pred.get("class_name") or pred.get("class"))
+                or "water"
+                in (pred.get("class_name") or pred.get("class") or "").lower()
+                or pred.get("detection_type")
+                == "classification"  # YOLOv11 water quality classification counts as water detection
+                for pred in inhouse_predictions
+            )
+
+        if packaging_info.get("water_visible"):
+            water_detected = True
+        if packaging_water_hits > 0:
+            water_detected = True
+
+        media_info = {
+            "media_count": len(actual_image_paths) + len(actual_video_paths),
+            "variant_count": len(frames_for_aggregation),
+            "frame_count": len(frames),
+        }
+
+        if non_water_brand_detected:
+            message = (
+                "Detected branded packaging that is not water-related. "
+                "Please provide water-specific samples."
+            )
+            _append_timeline(
+                timeline,
+                "finalizing",
+                "done",
+                "Detected non-water brand; analysis halted",
+            )
+            result_payload = {
+                "analysis_id": analysis_id,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "description": description,
+                "scene": {
+                    "majority": scene_majority,
+                    "samples": best_scene_results,
+                    "confidence": mean_scene_conf,
+                    "filter_analysis": scene_results_all,
+                },
+                "external_data": normalized_external,
+                "media": {
+                    "saved_files": saved_files,
+                    "frame_count": len(frames),
+                    "variant_count": len(frames_for_aggregation),
+                },
+                "aggregation": aggregation_result,
+                "inhouse_predictions": inhouse_predictions,
+                "timeline": timeline,
+                "status": "non_water_brand",
+                "message": message,
+                "packaging": packaging_info,
+                "history_saved": history_enabled,
+                "debug": {
+                    "enabled": debug_ctx.get("enabled"),
+                    "snapshots": (
+                        debug_ctx["manifest"] if debug_ctx.get("enabled") else {}
+                    ),
+                    "errors": debug_ctx["errors"],
+                },
+            }
+
+            if history_enabled:
+                result_path = storage_dir / "result.json"
+                with result_path.open("w", encoding="utf-8") as f:
+                    json.dump(
+                        _serialize_for_json(result_payload),
+                        f,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+
+                if debug_ctx.get("enabled"):
+                    debug_payload = {
+                        "frames": frames_for_aggregation,
+                        "metrics": metrics_per_frame,
+                        "filter_summary": filter_summary,
+                        "packaging": packaging_info,
+                        "snapshots": debug_ctx["manifest"],
+                        "errors": debug_ctx["errors"],
+                    }
+                    debug_path = storage_dir / "debug.json"
+                    with debug_path.open("w", encoding="utf-8") as f:
+                        json.dump(
+                            _serialize_for_json(debug_payload),
+                            f,
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+
+            response: Dict[str, Any] = {
+                "analysis_id": analysis_id,
+                "status": "non_water_brand",
+                "message": message,
+                "timeline": timeline,
+                "packaging": packaging_info,
+                "history_saved": history_enabled,
+            }
+            if not history_enabled:
+                response["result"] = result_payload
+            return response
+
+        if not water_detected:
+            # Provide more specific error message based on scene type with debug info
+            debug_info = (
+                f" [Debug: {len(aggregated_detections)} aggregated detections, {len(inhouse_predictions)} inhouse predictions]"
+                if debug
+                else ""
+            )
+
+            if scene_majority == "outdoor":
+                message = (
+                    "Water wasn't detected in the outdoor scene. "
+                    "Please ensure water bodies (lakes, rivers, streams) are clearly visible, "
+                    "or try different camera angles and lighting conditions."
+                    + debug_info
+                )
+            else:
+                if packaging_info.get("packaging_present"):
+                    if packaging_info.get("brand"):
+                        message = (
+                            f"Detected branded packaging ({packaging_info['brand']}) but couldn't "
+                            "confirm water content. Please ensure the liquid is clearly visible through "
+                            "transparent packaging."
+                        )
+                    else:
+                        message = (
+                            "Detected packaging but couldn't identify the brand or confirm water content. "
+                            "Please provide clearer images of the label or ensure the liquid is visible."
+                        )
+                else:
+                    message = (
+                        "No water or water-related packaging detected in indoor/unknown scene. "
+                        "Please provide images showing water directly, in transparent containers, "
+                        "or with visible packaging labels."
+                    )
+
+            _append_timeline(
+                timeline,
+                "water_confirmation",
+                "error",
+                message,
+            )
+            user_analysis: Optional[Dict[str, Any]] = None
+            assessment: Optional[UserInputAssessment] = None
+            if description:
+                _append_timeline(
+                    timeline,
+                    "user_input_analysis",
+                    "in-progress",
+                    "Assessing user notes with LLaMA 3",
+                )
+                _, _, assessment, user_analysis = _prepare_user_input_analysis(
+                    description,
+                    scene_majority,
+                    aggregation_result,
+                    normalized_external,
+                    metrics_per_frame,
+                    media_info,
+                )
+                if assessment and assessment.available:
+                    _append_timeline(
+                        timeline,
+                        "user_input_analysis",
+                        "done",
+                        f"LLM confidence {assessment.confidence:.0f}%",
+                    )
+                else:
+                    _append_timeline(
+                        timeline,
+                        "user_input_analysis",
+                        "warning",
+                        (
                             assessment.reason
                             if assessment and assessment.reason
                             else "User input model unavailable"
                         ),
+                    )
+
+            result_payload = {
+                "analysis_id": analysis_id,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "description": description,
+                "scene": {
+                    "majority": scene_majority,
+                    "samples": best_scene_results,
+                    "confidence": mean_scene_conf,
+                    "filter_analysis": scene_results_all,
+                },
+                "media": {
+                    "saved_files": saved_files,
+                    "frame_count": len(frames),
+                    "variant_count": len(frames_for_aggregation),
+                },
+                "aggregation": aggregation_result,
+                "inhouse_predictions": inhouse_predictions,
+                "timeline": timeline,
+                "status": "no_water_detected",
+                "message": message,
+                "user_analysis": user_analysis,
+                "external_data": normalized_external,
+                "packaging": packaging_info,
+                "filter_summary": filter_summary,
+                "history_saved": history_enabled,
+                "debug": {
+                    "enabled": debug_ctx.get("enabled"),
+                    "snapshots": (
+                        debug_ctx["manifest"] if debug_ctx.get("enabled") else {}
+                    ),
+                    "errors": debug_ctx["errors"],
+                },
+            }
+
+            if history_enabled:
+                result_path = storage_dir / "result.json"
+                with result_path.open("w", encoding="utf-8") as f:
+                    json.dump(
+                        _serialize_for_json(result_payload),
+                        f,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+
+                if debug_ctx.get("enabled"):
+                    debug_payload = {
+                        "frames": frames_for_aggregation,
+                        "metrics": metrics_per_frame,
+                        "filter_summary": filter_summary,
+                        "packaging": packaging_info,
+                        "snapshots": debug_ctx["manifest"],
+                        "errors": debug_ctx["errors"],
                     }
+                    debug_path = storage_dir / "debug.json"
+                    with debug_path.open("w", encoding="utf-8") as f:
+                        json.dump(
+                            _serialize_for_json(debug_payload),
+                            f,
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+
+            response = {
+                "analysis_id": analysis_id,
+                "status": "no_water_detected",
+                "message": message,
+                "timeline": timeline,
+                "aggregation": aggregation_result,
+                "inhouse_predictions": inhouse_predictions,
+                "history_saved": history_enabled,
+            }
+            if user_analysis is not None:
+                response["user_analysis"] = user_analysis
+            if not history_enabled:
+                response["result"] = result_payload
+            return response
+
+        if description:
+            _append_timeline(
+                timeline,
+                "user_input_analysis",
+                "in-progress",
+                "Assessing user notes with LLaMA 3",
+            )
+
+        score_context, _baseline_scores, assessment, user_analysis = (
+            _prepare_user_input_analysis(
+                description,
+                scene_majority,
+                aggregation_result,
+                normalized_external,
+                metrics_per_frame,
+                media_info,
+            )
+        )
+
+        if description:
+            if assessment and assessment.available:
+                _append_timeline(
+                    timeline,
+                    "user_input_analysis",
+                    "done",
+                    f"LLM confidence {assessment.confidence:.0f}%",
                 )
+            else:
+                _append_timeline(
+                    timeline,
+                    "user_input_analysis",
+                    "warning",
+                    (
+                        assessment.reason
+                        if assessment and assessment.reason
+                        else "User input model unavailable"
+                    ),
+                )
+
+        scores = compute_scores(score_context)
+        _append_timeline(timeline, "scoring", "done", scores["band_label"])
 
         result_payload = {
             "analysis_id": analysis_id,
@@ -599,258 +1777,107 @@ async def analyze_endpoint(
             "description": description,
             "scene": {
                 "majority": scene_majority,
-                "samples": scene_results,
+                "samples": best_scene_results,
                 "confidence": mean_scene_conf,
+                "filter_analysis": scene_results_all,
             },
+            "external_data": normalized_external,
             "media": {
                 "saved_files": saved_files,
                 "frame_count": len(frames),
-                "variant_count": total_variants,
+                "variant_count": len(frames_for_aggregation),
             },
             "aggregation": aggregation_result,
+            "inhouse_predictions": inhouse_predictions,
+            "scores": scores,
             "timeline": timeline,
-            "status": "no_water_detected",
-            "message": water_detection_message,
             "user_analysis": user_analysis,
+            "packaging": packaging_info,
+            "packaging_water_hits": packaging_water_hits,
+            "filter_summary": filter_summary,
+            "history_saved": history_enabled,
             "debug": {
-                "enabled": debug,
-                "detection_images": debug_images_manifest if debug else [],
+                "enabled": debug_ctx.get("enabled"),
+                "snapshots": debug_ctx["manifest"] if debug_ctx.get("enabled") else {},
+                "errors": debug_ctx["errors"],
             },
         }
 
-        result_path = target_dir / "result.json"
-        with result_path.open("w", encoding="utf-8") as f:
-            json.dump(
-                _serialize_for_json(result_payload), f, ensure_ascii=False, indent=2
-            )
+        _append_timeline(
+            timeline,
+            "finalizing",
+            "done",
+            "Results saved" if history_enabled else "Results prepared",
+        )
 
-        response: Dict[str, Any] = {
-            "analysis_id": analysis_id,
-            "status": "no_water_detected",
-            "message": water_detection_message,
-            "result_path": str(result_path),
-            "timeline": timeline,
-            "aggregation": aggregation_result,
-        }
-        if user_analysis is not None:
-            response["user_analysis"] = user_analysis
-
-        if debug:
-            debug_path = target_dir / "debug.json"
-            with debug_path.open("w", encoding="utf-8") as f:
+        if history_enabled:
+            result_path = storage_dir / "result.json"
+            with result_path.open("w", encoding="utf-8") as f:
                 json.dump(
-                    _serialize_for_json(
-                        {
-                            "frames": frames_for_aggregation,
-                            "metrics": metrics_per_frame,
-                            "detection_images": debug_images_manifest,
-                        }
-                    ),
+                    _serialize_for_json(result_payload),
                     f,
                     ensure_ascii=False,
                     indent=2,
                 )
-            response["debug_path"] = str(debug_path)
+
+            if debug_ctx.get("enabled"):
+                debug_payload = {
+                    "frames": frames_for_aggregation,
+                    "metrics": metrics_per_frame,
+                    "filter_summary": filter_summary,
+                    "packaging": packaging_info,
+                    "snapshots": debug_ctx["manifest"],
+                    "errors": debug_ctx["errors"],
+                }
+                debug_path = storage_dir / "debug.json"
+                with debug_path.open("w", encoding="utf-8") as f:
+                    json.dump(
+                        _serialize_for_json(debug_payload),
+                        f,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+
+        response: Dict[str, Any] = {
+            "analysis_id": analysis_id,
+            "status": "completed",
+            "scores": scores,
+            "scene": result_payload["scene"],
+            "external_data": normalized_external,
+            "timeline": timeline,
+            "media": result_payload["media"],
+            "aggregation": aggregation_result,
+            "inhouse_predictions": inhouse_predictions,
+            "user_analysis": user_analysis,
+            "filter_summary": filter_summary,
+            "packaging": packaging_info,
+            "packaging_water_hits": packaging_water_hits,
+            "history_saved": history_enabled,
+        }
+
+        if debug_ctx.get("enabled"):
             base_url = f"/api/results/{analysis_id}/artifacts"
-            response["debug_images"] = [
+            detector_snapshots = [
                 {
-                    **img,
+                    **entry,
                     "url": "{}/{}".format(
                         base_url,
-                        str(img.get("relative_path", "")).replace("\\", "/"),
+                        str(entry.get("relative_path", "")).replace("\\", "/"),
                     ),
                 }
-                for img in debug_images_manifest
+                for entry in debug_ctx["manifest"].get("detector", [])
             ]
+            response["debug_images"] = detector_snapshots
+            response["detector_errors"] = debug_ctx["errors"]["detector"]
+            if history_enabled:
+                response["debug_path"] = str(storage_dir / "debug.json")
 
-        timeline.append(
-            {
-                "step": "finalizing",
-                "status": "done",
-                "detail": "Results saved without detections",
-            }
-        )
-        response["timeline"] = timeline
+        if history_enabled:
+            response["result_path"] = str(storage_dir / "result.json")
+        else:
+            response["result"] = result_payload
 
         return response
-
-    if debug:
-        if debug_images_manifest:
-            timeline.append(
-                {
-                    "step": "debug_detections",
-                    "status": "done",
-                    "detail": f"Captured {len(debug_images_manifest)} annotated frames",
-                }
-            )
-        else:
-            timeline.append(
-                {
-                    "step": "debug_detections",
-                    "status": "warning",
-                    "detail": "No detections captured for debug",
-                }
-            )
-
-    external_raw: Dict[str, Any] | None = None
-    normalized_external: Dict[str, Any] = {}
-    if lat is not None and lon is not None:
-        timeline.append({"step": "external_data", "status": "in-progress"})
-        try:
-            external_raw = fetch_nearest_station(lat=lat, lon=lon)
-            normalized_external = normalize_external(external_raw)
-            if normalized_external:
-                distance = normalized_external.get("distance_km")
-                if isinstance(distance, (int, float)):
-                    distance_detail = f"{distance:.2f} km"
-                else:
-                    distance_detail = "unknown distance"
-                timeline.append(
-                    {
-                        "step": "external_data",
-                        "status": "done",
-                        "detail": f"station={normalized_external.get('station_id')} distance={distance_detail}",
-                    }
-                )
-            else:
-                timeline.append(
-                    {
-                        "step": "external_data",
-                        "status": "warning",
-                        "detail": "No station found within range",
-                    }
-                )
-        except Exception as exc:
-            timeline.append(
-                {"step": "external_data", "status": "error", "detail": str(exc)}
-            )
-            normalized_external = {}
-
-    if description:
-        timeline.append(
-            {
-                "step": "user_input_analysis",
-                "status": "in-progress",
-                "detail": "Assessing user notes with LLaMA 3",
-            }
-        )
-
-    score_context, _baseline_scores, assessment, user_analysis = (
-        _prepare_user_input_analysis(
-            description,
-            scene_majority,
-            aggregation_result,
-            normalized_external,
-            metrics_per_frame,
-            media_info,
-        )
-    )
-
-    if description:
-        if assessment and assessment.available:
-            timeline.append(
-                {
-                    "step": "user_input_analysis",
-                    "status": "done",
-                    "detail": f"LLM confidence {assessment.confidence:.0f}%",
-                }
-            )
-        else:
-            timeline.append(
-                {
-                    "step": "user_input_analysis",
-                    "status": "warning",
-                    "detail": (
-                        assessment.reason
-                        if assessment and assessment.reason
-                        else "User input model unavailable"
-                    ),
-                }
-            )
-
-    scores = compute_scores(score_context)
-    timeline.append(
-        {"step": "scoring", "status": "done", "detail": scores["band_label"]}
-    )
-
-    result_payload = {
-        "analysis_id": analysis_id,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "description": description,
-        "scene": {
-            "majority": scene_majority,
-            "samples": scene_results,
-            "confidence": mean_scene_conf,
-        },
-        "external_data": normalized_external,
-        "media": {
-            "saved_files": saved_files,
-            "frame_count": len(frames),
-            "variant_count": total_variants,
-        },
-        "aggregation": aggregation_result,
-        "scores": scores,
-        "timeline": timeline,
-        "user_analysis": user_analysis,
-        "debug": {
-            "enabled": debug,
-            "detection_images": debug_images_manifest if debug else [],
-        },
-    }
-
-    timeline.append(
-        {
-            "step": "finalizing",
-            "status": "done",
-            "detail": "Results saved",
-        }
-    )
-
-    result_path = target_dir / "result.json"
-    with result_path.open("w", encoding="utf-8") as f:
-        json.dump(_serialize_for_json(result_payload), f, ensure_ascii=False, indent=2)
-
-    response = {
-        "analysis_id": analysis_id,
-        "status": "completed",
-        "result_path": str(result_path),
-    }
-    if debug:
-        debug_path = target_dir / "debug.json"
-        with debug_path.open("w", encoding="utf-8") as f:
-            json.dump(
-                _serialize_for_json(
-                    {
-                        "frames": frames_for_aggregation,
-                        "metrics": metrics_per_frame,
-                        "detection_images": debug_images_manifest,
-                    }
-                ),
-                f,
-                ensure_ascii=False,
-                indent=2,
-            )
-        response["debug_path"] = str(debug_path)
-        base_url = f"/api/results/{analysis_id}/artifacts"
-        response["debug_images"] = [
-            {
-                **img,
-                "url": "{}/{}".format(
-                    base_url,
-                    str(img.get("relative_path", "")).replace("\\", "/"),
-                ),
-            }
-            for img in debug_images_manifest
-        ]
-
-    response["scores"] = scores
-    response["scene"] = result_payload["scene"]
-    if normalized_external:
-        response["external_data"] = normalized_external
-    response["timeline"] = timeline
-    response["media"] = result_payload["media"]
-    response["aggregation"] = aggregation_result
-    if user_analysis is not None:
-        response["user_analysis"] = user_analysis
-
-    return response
+    finally:
+        if not history_enabled:
+            shutil.rmtree(storage_dir, ignore_errors=True)

@@ -22,7 +22,7 @@ Clarifications applied (2025-09-22):
 
 - Python 3.x; CUDA multi-GPU supported with CPU fallback.
 - Primary object detector is RF-DETR. In-house YOLOv11/YOLOv12-compatible models handle custom classes (algae, twigs, particulates) for detection and classification.
-- Automatic frame/image de-duplication: the system skips near-duplicate frames and near-duplicate still images to reduce processing time.
+- Automatic frame/image de-duplication: the system skips near-duplicate frames and near-duplicate still images to reduce processing time using adaptive change detection (cap 250 frames per minute of video, stop when frames are redundant).
 - Internet access is allowed for model downloads and external public datasets.
 - Persistence is enabled by default; analyses and media are stored under `history/`.
 - Single entrypoint is `WebInterface/app.py` (runs backend and serves the frontend).
@@ -71,9 +71,12 @@ Use these exact resources for Places365 auto-download (required):
 │  └─ backend/
 │     ├─ __init__.py
 │     ├─ Models/
-│     │  ├─ CustomModel/
-│     │  │  ├─ Classification.pt   # in-house classification weights (yolo11/yolo12 compatible)
-│     │  │  └─ ObjectDetection.pt  # in-house object bounding box weights
+│     │  ├─ InHouse/
+│     │  │  ├─ CLS.pt             # in-house fine-tuned YOLOv11 classification model (clean vs dirty)
+│     │  │  └─ OBB.pt             # in-house fine-tuned YOLOv11 object detection model (oriented bounding boxes)
+│     │  ├─ CustomModel/           # legacy model location (for backward compatibility)
+│     │  │  ├─ Classification.pt   # alternative classification weights
+│     │  │  └─ ObjectDetection.pt  # alternative object detection weights
 │     │  ├─ Place365/
 │     │  │  ├─ deploy_resnet152_places365.prototxt
 │     │  │  └─ resnet152_places365.caffemodel
@@ -132,32 +135,44 @@ Notes:
 
 **Processing status area (timeline)**
 
-- A left or right column shows a **timeline / status area** that lists processing stages in order and updates in real time (or via polling):
-  1. "Preparing media" (extract frames)
-  2. "Applying filters" → shows which filter(s) are running (e.g., `original`, `denoise`, `contrast_stretch`)
-  3. "Running scene classifier (Places365)" → show `scene: outdoor (0.92)`
-  4. "Fetching external data" → show source & station (if applicable)
-  5. "Running detector (RF-DETR / YOLO)" → per-frame progress and top detection(s)
-  6. "Aggregating results" → computing scores
-  7. "Finalizing" → saving debug artifacts
-- Each timeline item has a status icon (pending / in-progress / done / error) and optional timestamp.
+- The timeline acts like a structured debug log. Each entry mirrors a pipeline step with granular detail text supplied by the backend (filters chosen, detector scores, branch decisions, etc.).
+- Core steps (always shown in skeleton):
+  1. `Media ingestion` → validates uploads, extracts frames, performs similarity-based deduplication (cap 250 extracted frames per minute of video).
+  2. `Scene detection (Places365)` → reports dominant indoor/outdoor label and confidence.
+  3. `Scene routing` → states whether outdoor path (external data) or indoor/unknown path (packaging & OCR) is engaged.
+  4. `Adaptive filter stack` → lists filters applied (e.g., "White balance", "Contrast stretch", "Highlight suppression").
+  5. `Detection engines` → detector confidence summary, fallback usage, top detections.
+  6. `Aggregation` → cross-variant fusion outcome (detection count, top class/score).
+  7. `Water confirmation` → consolidated verdict (outdoor cues, packaging crops, or warnings).
+  8. `Scoring` → band label and overall status.
+  9. `Finalizing` → persistence vs. ephemeral result.
+- Optional entries appear when relevant and are logged inline with statuses:
+  - `Outdoor external data` & `Outdoor detector` (location-based fetch, fallback to in-house model when station data missing).
+  - `Packaging detection`, `Brand & OCR`, `Liquid confirmation` for indoor/unknown scenes.
+  - `User notes analysis` when the LLaMA adapter interprets text.
+- Each entry surfaces status icons (pending / in-progress / done / warning / error) and timestamp/description so operators can treat the timeline as a readable audit trail.
 
 **Debug mode**
 
-- Checkbox `Debug` in UI. If checked, the timeline area also includes a small console-like pane showing `console.log` messages from the backend (streamed or polled). This includes adapter loading logs, filter choices, model confidences, and warnings.
-- Debug pane supports copying logs and downloading debug artifacts as a ZIP.
+- Checkbox `Debug` in UI. If checked, the timeline area stays verbose and the debug console streams backend log lines (adapter selection, filter boosts, external data issues, fallback decisions).
+- Detection snapshots are grouped by source in collapsible sections (e.g., `Scene classifier`, `Adaptive filters`, `RF-DETR`, `OCR & crops`). Each filtered variant snapshot should use human-readable filter names (e.g., "White balance", "Highlight suppression").
+- Debug pane supports copying logs and downloading debug artifacts as JSON/ZIP, while image snapshots remain inline for rapid inspection.
+- Dedicated **Model Lab** page allows operators to choose an adapter (Places365, RF-DETR, In-house YOLO) and run isolated inference on a single image. Results show raw outputs, annotated previews, and—on failure—tracebacks and diagnostic notes so issues can be reproduced quickly.
 
 **Results area**
 
 - Show `Potability Score` (large number 0–100) and `Band Label`.
 - Show `Confidence Score` (0–100) and a colored badge: High / Moderate / Low.
 - Show `Cleanliness levels` (visual breakdown): `Turbidity proxy`, `Color deviation`, `Visible particulates` with small bar/score each.
-- Show `Which filter produced best detection` and a thumbnail of the best frame + annotated boxes.
+- Show provenance: which filter & frame produced the top detection and surface thumbnails (annotated) when available.
+- Expose history affordance: analyses are persisted by default but can be skipped via "Don’t save this" checkbox. When saved, the “Recent analyses” panel can reload past results and their debug artifacts.
 
 **Interaction & experience**
 
 - When Analyze is pressed, the UI adds a top-level `analysis-mode` class so layout adapts: timeline becomes visible, results area prepares streaming updates, upload control disabled until finished.
+- Users can opt out of persistence per run (`dont_save` checkbox). When disabled, debug artifact download links are hidden/disabled.
 - Provide progress indicators for long tasks; provide link to continue polling or to retrieve results later (analysis ID).
+- History list surfaces saved analyses with timestamps and quick links to reload results/debug snapshots.
 
 ---
 
@@ -193,9 +208,14 @@ Notes:
 ## 4.3 `backend/Adapters/InModel.py` (adapter)
 
 - Responsibilities:
-  - Load in-house models (YOLOv11 / YOLOv12) from `backend/Models/CustomModel/*.pt`.
-  - Provide `predict(images, conf=0.25, iou=0.45)` returning unified detections.
-  - Support model selection via env var: `MODEL_BACKEND=inmodel|rfdetr`.
+  - Load two separate fine-tuned YOLOv11 models from `backend/Models/InHouse/`:
+    - `CLS.pt`: Water quality classification model ("bersih" vs "kotor")
+    - `OBB.pt`: Object detection model with oriented bounding boxes
+  - Provide `classify_water(image)` for water quality classification
+  - Provide `detect_objects(image)` for object detection with bounding boxes
+  - Provide `predict_comprehensive(image)` combining both models for complete analysis
+  - Work with filter algorithms to reach confidence thresholds through adaptive processing
+  - Support confidence-driven filter application to enhance detection accuracy
 
 ---
 
@@ -204,37 +224,52 @@ Notes:
 1. **Ingestion & validation**
 
    - Validate counts (<=25 images, <=5 videos) and video lengths (<=60s). Reject or truncate if policy violated.
-   - Extract frames from videos using adaptive sampling (see below).
+   - Extract frames from videos using adaptive similarity-based sampling (see below).
 
 2. **Frame sampling**
 
-   - For each video, sample up to `MAX_FRAMES_PER_VIDEO` frames using a strategy: uniform sampling capped at e.g. 60 frames per video or lower depending on CPU budget.
-   - Prefer keyframes or choose frames with minimum motion blur where possible.
+   - For each video, extract frames using similarity detection to avoid redundant processing:
+     - Compare consecutive frames using structural similarity (SSIM) or histogram difference
+     - Skip frames that are too similar to previously selected frames (threshold: 18.0 difference)
+     - Maximum 250 frames per video regardless of length
+     - Prefer frames with good exposure and minimal motion blur
+   - This reduces processing time while maintaining analysis quality
 
 3. **Variants generation (filters)**
 
-   - For each frame produce variants (configurable):
-     - `original`
-     - `auto_white_balance`
-     - `contrast_stretch` (CLAHE)
-     - `denoise` (non-local means)
-     - `sharpen`
-     - `gamma_correction` (gamma variations)
-     - `deglare` / highlight suppression
-   - Generate 3–6 variants per frame by default.
+- For each frame produce adaptive variants using confidence-driven filter selection:
+  - **Base filters**: `Original`, `White balance`, `Contrast stretch`
+  - **Enhancement filters**: `Denoise`, `Edge sharpen`, `Gamma boost`, `Highlight suppression`
+  - **Color filters**: `Red enhancement`, `Blue enhancement`, `Green enhancement`, `Cyan filter`, `Yellow filter`, `Magenta filter`
+- Apply filters progressively until detector confidence meets target (default 0.6) or maximum filters reached
+- Compare filter results and select best-performing variants based on detection confidence
+- Map internal operation keys to user-friendly names for debug snapshots (e.g., `gamma_1.2` → "Gamma boost 1.2", `red_enhance` → "Red enhancement")
 
 4. **Scene classification**
 
    - Run Places365 on a representative set of frames (e.g., 3 frames sampled across the media). Compute majority or weighted scene label.
 
-5. **External data fetch**
+5. **Scene routing & external data**
 
-   - If scene `outdoor` and `lat/lon` provided and permitted by user, run ingestion `backend/Ingestion/indonesia` to fetch station data. Choose nearest station within `EXTERNAL_MAX_DISTANCE_KM` (default 25 km).
+- After Places365 majority vote, route pipeline:
+  - **Outdoor** path → attempt location-based water quality fetch (within configurable radius). If location missing or station unavailable, fall back to in-house detector.
+  - **Indoor/Unknown** path → engage packaging detection and OCR to infer brand. Check if brand is water-related:
+    - If recognizable water brand → fetch brand quality data if available
+    - If non-water brand → reject with error
+    - If brand unknown → crop to water area in packaging (if transparent liquid visible) → use in-house model
+    - If no packaging/liquid visible → end analysis (water not detected)
+- Outdoor path still triggers ingestion `backend/Ingestion/indonesia` when `lat/lon` supplied.
+- **Adaptive filter strategy**: Use confidence-based filter selection. If detector confidence is low, progressively apply more filters (original → white balance → contrast → denoise → color enhancements) until confidence target is reached or all filters exhausted.
 
 6. **Detection**
 
-   - Run detector adapter (RF-DETR primary, InModel optional) on all variants and aggregate.
-   - Track objects across frames via IoU-based tracker to build stability and persistence evidence.
+- Run InModel adapter with both fine-tuned YOLOv11 models (CLS.pt + OBB.pt) on adaptive variants.
+- CLS.pt provides water quality classification (clean vs dirty) with confidence scores.
+- OBB.pt provides object detection with oriented bounding boxes for water quality indicators.
+- Adaptive filter application continues until target confidence threshold is reached or all filters exhausted.
+- Fall back to RF-DETR when InModel confidence is insufficient or models unavailable.
+- Track objects across frames via IoU-based tracker to build stability and persistence evidence.
+- Store annotated snapshots per detector/variant for debugging.
 
 7. **Visual metrics**
 
@@ -247,10 +282,12 @@ Notes:
 
 9. **Scoring**
 
-   - Call scoring engine (see §6) to compute `potability_score` and `confidence_score`.
+- Call scoring engine (see §6) to compute `potability_score` and `confidence_score`. Link final band label back to timeline entry (`Scoring`).
 
 10. **Return results**
-    - Return summary, components, and (if debug) a rich `debug` object with annotated images, selected frames, filter provenance, and logs.
+
+- Return summary, components, timeline (detailed log), and (if debug) a rich `debug` object with grouped snapshots (`scene`, `filters`, `detector`, `ocr`) plus manifest metadata.
+- Include detector error diagnostics and stack traces when a model invocation fails so downstream consumers can inspect root causes.
 
 ---
 
@@ -346,6 +383,7 @@ Notes:
 - `GET /api/results/{analysis_id}` — returns stored result JSON
 
 - `GET /api/models/status` — lists available models & checksums
+- `POST /api/debug/run` — run a single adapter against an uploaded image (`model={place365|rf_detr|inmodel}`) and return structured results, annotated previews, and stack traces when errors occur
 
 **Response schema (summary)**
 
@@ -374,6 +412,8 @@ Notes:
 - `Debug` checkbox enables detailed streaming logs to the frontend timeline console.
 - Save debug artifacts (annotated frames, selected best variants, filter that yielded best detection) when `debug=true`.
 - Allow download of debug ZIP via `GET /api/results/{id}/debug.zip`.
+- Capture per-filter detector failures (message + traceback) and surface them both in timeline warnings and in the returned `debug.errors` manifest.
+- Provide Model Lab interface (see §3) for manual adapter verification with transparent error reporting.
 
 ---
 

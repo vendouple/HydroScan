@@ -256,7 +256,7 @@ def get_model_status(base_dir: str) -> dict:
             "exists": path.exists(),
             "sha256": _sha256(path),
         }
-    for custom_file in ["ObjectDetection.pt", "Classification.pt"]:
+    for custom_file in ["ObjectDetection.pt", "CLS.pt", "OBB.pt", "Classification.pt"]:
         path = custom_dir / custom_file
         status[f"custom_{custom_file}"] = {
             "path": str(path),
