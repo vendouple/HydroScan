@@ -39,7 +39,6 @@ def create_app() -> FastAPI:
         from WebInterface.backend.Adapters.Place365 import Place365Adapter
 
         _ = RFDETRAdapter()
-        # InModel adapter now uses models_dir and looks for InHouse models automatically
         _ = InModelAdapter(models_dir=MODELS_DIR)
         _ = Place365Adapter(models_dir=MODELS_DIR)
         print("[HydroScan] Models initialized (RT-DETR, InModel, Places365)")

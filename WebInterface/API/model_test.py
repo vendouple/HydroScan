@@ -57,7 +57,9 @@ async def test_places365(image: Image.Image) -> Dict[str, Any]:
         import os
         from pathlib import Path
 
-        models_dir = Path(__file__).resolve().parents[2] / "backend" / "Models"
+        models_dir = (
+            Path(__file__).resolve().parents[2] / "WebInterface" / "backend" / "Models"
+        )
         adapter = Place365Adapter(models_dir=str(models_dir))
 
         # Use the correct method name - 'classify' not 'predict'
@@ -110,7 +112,9 @@ async def test_inmodel_classification(image: Image.Image) -> Dict[str, Any]:
         import os
         from pathlib import Path
 
-        models_dir = Path(__file__).resolve().parents[2] / "backend" / "Models"
+        models_dir = (
+            Path(__file__).resolve().parents[2] / "WebInterface" / "backend" / "Models"
+        )
         custom_dir = models_dir / "CustomModel"
 
         # Check multiple possible classification model locations
@@ -128,8 +132,10 @@ async def test_inmodel_classification(image: Image.Image) -> Dict[str, Any]:
                 classification_weights = str(path)
                 break
 
-        # InModel adapter now uses models_dir and looks for InHouse models automatically
-        models_dir = Path(__file__).resolve().parents[2] / "backend" / "Models"
+        # InModel adapter now uses models_dir and looks for CustomModel automatically
+        models_dir = (
+            Path(__file__).resolve().parents[2] / "WebInterface" / "backend" / "Models"
+        )
 
         # Debug: Check if models directory exists
         if not models_dir.exists():
@@ -174,7 +180,9 @@ async def test_inmodel_obb(image: Image.Image) -> Dict[str, Any]:
         import os
         from pathlib import Path
 
-        models_dir = Path(__file__).resolve().parents[2] / "backend" / "Models"
+        models_dir = (
+            Path(__file__).resolve().parents[2] / "WebInterface" / "backend" / "Models"
+        )
 
         # Try to find OBB weights
         possible_obb_paths = [
@@ -190,8 +198,10 @@ async def test_inmodel_obb(image: Image.Image) -> Dict[str, Any]:
                 obb_weights = str(path)
                 break
 
-        # InModel adapter now uses models_dir and looks for InHouse models automatically
-        models_dir = Path(__file__).resolve().parents[2] / "backend" / "Models"
+        # InModel adapter now uses models_dir and looks for CustomModel automatically
+        models_dir = (
+            Path(__file__).resolve().parents[2] / "WebInterface" / "backend" / "Models"
+        )
 
         # Debug: Check if models directory exists
         if not models_dir.exists():
@@ -234,7 +244,9 @@ async def test_comprehensive(image: Image.Image) -> Dict[str, Any]:
         import os
         from pathlib import Path
 
-        models_dir = Path(__file__).resolve().parents[2] / "backend" / "Models"
+        models_dir = (
+            Path(__file__).resolve().parents[2] / "WebInterface" / "backend" / "Models"
+        )
         custom_dir = models_dir / "CustomModel"
 
         # Try to find all model weights
@@ -267,7 +279,7 @@ async def test_comprehensive(image: Image.Image) -> Dict[str, Any]:
                 obb_weights = str(path)
                 break
 
-        # InModel adapter now uses models_dir and looks for InHouse models automatically
+        # InModel adapter now uses models_dir and looks for CustomModel automatically
         # Debug: Check if models directory exists
         if not models_dir.exists():
             return {

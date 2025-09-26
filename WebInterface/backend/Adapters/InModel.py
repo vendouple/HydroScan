@@ -10,7 +10,7 @@ class InModelAdapter:
     """
     In-house YOLOv11 adapter for water quality detection.
 
-    Uses two separate fine-tuned YOLOv11 models from /Models/InHouse:
+    Uses two separate fine-tuned YOLOv11 models from /Models/CustomModel:
     - CLS.pt: Classification model (clean vs dirty water)
     - OBB.pt: Object Bounding Box model (detecting water quality indicators)
 
@@ -55,7 +55,7 @@ class InModelAdapter:
         Initialize InModel adapter with two separate YOLOv11 models.
 
         Args:
-            models_dir: Path to Models directory (will look for Models/InHouse/)
+            models_dir: Path to Models directory (will look for Models/CustomModel/)
             device: Device to run models on ('cpu', 'cuda', etc.)
         """
         self.device = device or os.environ.get("YOLO_DEVICE", "cpu")
@@ -67,9 +67,9 @@ class InModelAdapter:
             # Default to backend/Models from this file's location
             self.models_dir = Path(__file__).parent.parent / "Models"
 
-        self.in_house_dir = self.models_dir / "InHouse"
-        self.cls_path = self.in_house_dir / "CLS.pt"
-        self.obb_path = self.in_house_dir / "OBB.pt"
+        self.custom_model_dir = self.models_dir / "CustomModel"
+        self.cls_path = self.custom_model_dir / "CLS.pt"
+        self.obb_path = self.custom_model_dir / "OBB.pt"
 
         # Model instances
         self.classifier = None  # CLS.pt - Water quality classification
@@ -84,7 +84,7 @@ class InModelAdapter:
         try:
             from ultralytics import YOLO
 
-            print(f"[InModel] Looking for models in: {self.in_house_dir}")
+            print(f"[InModel] Looking for models in: {self.custom_model_dir}")
             print(
                 f"[InModel] CLS.pt path: {self.cls_path} (exists: {self.cls_path.exists()})"
             )
@@ -305,7 +305,7 @@ class InModelAdapter:
         self, image: Image.Image, conf: float = 0.25, iou: float = 0.45
     ) -> Dict[str, Any]:
         """
-        Comprehensive prediction using both InHouse models.
+        Comprehensive prediction using both CustomModel models.
 
         Uses CLS.pt for classification and OBB.pt for object detection.
         Combines results to provide complete water quality analysis.
@@ -348,7 +348,7 @@ class InModelAdapter:
         self, image: Image.Image
     ) -> Tuple[str, Dict[str, float], Image.Image]:
         """
-        Comprehensive water quality analysis using both InHouse models.
+        Comprehensive water quality analysis using both CustomModel models.
 
         Returns:
             - status_log: Detailed processing steps as string
@@ -358,7 +358,7 @@ class InModelAdapter:
         status = []
         img = image.convert("RGB")
 
-        status.append("🔍 [1] Running InHouse YOLOv11 water quality detection")
+        status.append("🔍 [1] Running CustomModel YOLOv11 water quality detection")
         status.append(
             f"📊 Models loaded: Classification={self.models_loaded['classification']}, OBB={self.models_loaded['obb']}"
         )

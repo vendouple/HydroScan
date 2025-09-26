@@ -50,7 +50,7 @@ This file tracks implementation progress aligned with `plan.md`.
   - [x] Detailed stack traces and error reporting for troubleshooting
   - [x] API endpoint `/api/model-test` with full diagnostic capabilities
 - [x] **Enhanced Water Detection Logic**
-  - [x] Improved water confirmation logic to include inhouse predictions
+  - [x] Improved water confirmation logic to include custom model predictions
   - [x] Better error messages with debug information
   - [x] Detection counting across all model outputs
 - [x] **InModel Adapter Redesign (September 2025)**
@@ -61,7 +61,7 @@ This file tracks implementation progress aligned with `plan.md`.
   - [x] Updated `predict_comprehensive()` combining both models
   - [x] Enhanced `classify_image_comprehensive()` with proper annotation
   - [x] Model status tracking and debugging capabilities
-  - [x] Updated plan.md to reflect new InHouse model structure
+  - [x] Updated plan.md to reflect new CustomModel structure
   - [x] Model Lab integration with CLS.pt and OBB.pt priority detection
 - [ ] Add similarity-based frame extraction for video processing
 - [ ] Add comprehensive debugging interface improvements

@@ -12,14 +12,6 @@ PLACES365_CAFFE_URL = os.environ.get(
     "PLACES365_CAFFE_URL",
     "http://places2.csail.mit.edu/models_places365/resnet152_places365.caffemodel",
 )
-PLACES365_CATEGORIES_URL = os.environ.get(
-    "PLACES365_CATEGORIES_URL",
-    "https://raw.githubusercontent.com/CSAILVision/places365/master/categories_places365.txt",
-)
-PLACES365_IO_URL = os.environ.get(
-    "PLACES365_IO_URL",
-    "https://raw.githubusercontent.com/CSAILVision/places365/master/IO_places365.txt",
-)
 
 
 def ensure_models(base_dir: str) -> None:
@@ -34,8 +26,6 @@ def ensure_models(base_dir: str) -> None:
 
     prototxt_path = place365_dir / "deploy_resnet152_places365.prototxt"
     caffemodel_path = place365_dir / "resnet152_places365.caffemodel"
-    categories_path = place365_dir / "categories_places365.txt"
-    io_path = place365_dir / "IO_places365.txt"
 
     # Lazy import requests to avoid hard dependency during cold imports
     def _download_stream(
@@ -155,7 +145,6 @@ def ensure_models(base_dir: str) -> None:
                 or (min_length and min_length > 0)
                 or label.lower().endswith("prototxt")
                 or label.lower().endswith("categories")
-                or "io list" in label.lower()
             )
             if should_validate:
                 if not _validate_plaintext(
@@ -202,18 +191,6 @@ def ensure_models(base_dir: str) -> None:
         "Places365 caffemodel",
         min_length=0,
     )
-    _ensure(
-        PLACES365_CATEGORIES_URL,
-        categories_path,
-        "Places365 categories",
-        min_length=64,
-    )
-    _ensure(
-        PLACES365_IO_URL,
-        io_path,
-        "Places365 IO list",
-        min_length=16,
-    )
 
 
 def _sha256(path: Path) -> str | None:
@@ -235,8 +212,6 @@ def get_model_status(base_dir: str) -> dict:
     assets = {
         "place365_prototxt": place365_dir / "deploy_resnet152_places365.prototxt",
         "place365_caffemodel": place365_dir / "resnet152_places365.caffemodel",
-        "place365_categories": place365_dir / "categories_places365.txt",
-        "place365_io": place365_dir / "IO_places365.txt",
     }
 
     status = {}
@@ -249,14 +224,7 @@ def get_model_status(base_dir: str) -> dict:
 
     object_detection_dir = models_dir / "ObjectDetection"
     custom_dir = models_dir / "CustomModel"
-    for det_file in ["rf_detr_checkpoint.pth", "yolo11n.pt", "yolov12_best.pt"]:
-        path = object_detection_dir / det_file
-        status[f"detector_{det_file}"] = {
-            "path": str(path),
-            "exists": path.exists(),
-            "sha256": _sha256(path),
-        }
-    for custom_file in ["ObjectDetection.pt", "CLS.pt", "OBB.pt", "Classification.pt"]:
+    for custom_file in ["CLS.pt", "OBB.pt"]:
         path = custom_dir / custom_file
         status[f"custom_{custom_file}"] = {
             "path": str(path),

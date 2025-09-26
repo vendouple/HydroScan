@@ -150,7 +150,7 @@ def _load_rfdetr_adapter() -> RFDETRAdapter:
     global _rfdetr_adapter
     if _rfdetr_adapter is None:
         checkpoint_env = os.environ.get("RFDETR_CHECKPOINT")
-        default_checkpoint = MODELS_DIR / "RFDETR" / "rf_detr_m.pth"
+        default_checkpoint = MODELS_DIR / "RFDETR" / "rf-detr-medium.pth"
         checkpoint = checkpoint_env or (
             str(default_checkpoint) if default_checkpoint.exists() else None
         )
@@ -173,7 +173,7 @@ def _load_inmodel_adapter() -> InModelAdapter:
             "INMODEL_CLASSIFIER",
             str(MODELS_DIR / "CustomModel" / "CLS.pt"),
         )
-        # InModel adapter now uses models_dir and looks for InHouse models automatically
+        # InModel adapter now uses models_dir and looks for CustomModel automatically
         _inmodel_adapter = InModelAdapter(models_dir=str(MODELS_DIR))
     return _inmodel_adapter
 
@@ -236,9 +236,23 @@ def _select_detector_adapter() -> RFDETRAdapter | InModelAdapter:
     adapter = (
         _load_rfdetr_adapter() if backend != "inmodel" else _load_inmodel_adapter()
     )
-    if adapter.model is None and backend != "inmodel":
+
+    def _adapter_ready(candidate: RFDETRAdapter | InModelAdapter) -> bool:
+        if hasattr(candidate, "model"):
+            return getattr(candidate, "model") is not None
+        models_loaded = getattr(candidate, "models_loaded", None)
+        if isinstance(models_loaded, dict) and any(models_loaded.values()):
+            return True
+        if any(
+            getattr(candidate, attr, None) is not None
+            for attr in ("classifier", "obb_detector")
+        ):
+            return True
+        return False
+
+    if not _adapter_ready(adapter) and backend != "inmodel":
         fallback = _load_inmodel_adapter()
-        if fallback.model is not None:
+        if _adapter_ready(fallback):
             return fallback
     return adapter
 
@@ -1373,12 +1387,12 @@ async def analyze_endpoint(
                     )
 
         # Get detailed In House Model predictions with bounding boxes
-        inhouse_predictions = []
-        inhouse_adapter = _load_inmodel_adapter()
-        if inhouse_adapter.model is not None:
+        custom_model_predictions = []
+        custom_model_adapter = _load_inmodel_adapter()
+        if custom_model_adapter.model is not None:
             _append_timeline(
                 timeline,
-                "inhouse_analysis",
+                "custom_model_analysis",
                 "in-progress",
                 "🤖 Running In House Model for detailed predictions...",
                 progress=7,
@@ -1390,7 +1404,7 @@ async def analyze_endpoint(
                 prediction_frames = frames[:3] if len(frames) > 3 else frames
 
                 # Run traditional prediction for compatibility
-                frame_predictions = inhouse_adapter.predict(
+                frame_predictions = custom_model_adapter.predict(
                     prediction_frames, conf=DETECTOR_THRESHOLD
                 )
 
@@ -1398,13 +1412,15 @@ async def analyze_endpoint(
                     for pred in predictions:
                         pred_with_frame = pred.copy()
                         pred_with_frame["frame_index"] = frame_idx
-                        inhouse_predictions.append(pred_with_frame)
+                        custom_model_predictions.append(pred_with_frame)
 
                 # Run comprehensive YOLOv11 predictions with OBB and classification
                 for frame_idx, frame in enumerate(prediction_frames):
                     try:
-                        comprehensive_results = inhouse_adapter.predict_comprehensive(
-                            frame, conf=DETECTOR_THRESHOLD
+                        comprehensive_results = (
+                            custom_model_adapter.predict_comprehensive(
+                                frame, conf=DETECTOR_THRESHOLD
+                            )
                         )
 
                         # Add OBB detections
@@ -1413,7 +1429,7 @@ async def analyze_endpoint(
                         ):
                             obb_detection["frame_index"] = frame_idx
                             obb_detection["detection_type"] = "obb"
-                            inhouse_predictions.append(obb_detection)
+                            custom_model_predictions.append(obb_detection)
 
                         # Add classification results
                         for classification in comprehensive_results.get(
@@ -1421,7 +1437,7 @@ async def analyze_endpoint(
                         ):
                             classification["frame_index"] = frame_idx
                             classification["detection_type"] = "classification"
-                            inhouse_predictions.append(classification)
+                            custom_model_predictions.append(classification)
 
                     except Exception as comp_e:
                         print(
@@ -1430,9 +1446,9 @@ async def analyze_endpoint(
 
                 _append_timeline(
                     timeline,
-                    "inhouse_analysis",
+                    "custom_model_analysis",
                     "done",
-                    f"🤖 In House Model: {len(inhouse_predictions)} predictions across {len(prediction_frames)} frames",
+                    f"🤖 Custom Model: {len(custom_model_predictions)} predictions across {len(prediction_frames)} frames",
                     progress=7,
                     total_steps=8,
                 )
@@ -1440,7 +1456,7 @@ async def analyze_endpoint(
             except Exception as e:
                 _append_timeline(
                     timeline,
-                    "inhouse_analysis",
+                    "custom_model_analysis",
                     "warning",
                     f"⚠️ In House Model error: {str(e)}",
                     progress=7,
@@ -1449,8 +1465,10 @@ async def analyze_endpoint(
 
         # Water confirmation logic (applies to all scenarios)
         if scene_majority == "outdoor":
-            total_detections = len(aggregated_detections) + len(inhouse_predictions)
-            if aggregated_detections or inhouse_predictions:
+            total_detections = len(aggregated_detections) + len(
+                custom_model_predictions
+            )
+            if aggregated_detections or custom_model_predictions:
                 _append_timeline(
                     timeline,
                     "water_confirmation",
@@ -1470,15 +1488,15 @@ async def analyze_endpoint(
             for det in aggregated_detections
         )
 
-        # Also check inhouse predictions for water-related detections
-        if inhouse_predictions:
+        # Also check custom model predictions for water-related detections
+        if custom_model_predictions:
             water_detected = water_detected or any(
                 _contains_water_keyword(pred.get("class_name") or pred.get("class"))
                 or "water"
                 in (pred.get("class_name") or pred.get("class") or "").lower()
                 or pred.get("detection_type")
                 == "classification"  # YOLOv11 water quality classification counts as water detection
-                for pred in inhouse_predictions
+                for pred in custom_model_predictions
             )
 
         if packaging_info.get("water_visible"):
@@ -1520,7 +1538,7 @@ async def analyze_endpoint(
                     "variant_count": len(frames_for_aggregation),
                 },
                 "aggregation": aggregation_result,
-                "inhouse_predictions": inhouse_predictions,
+                "custom_model_predictions": custom_model_predictions,
                 "timeline": timeline,
                 "status": "non_water_brand",
                 "message": message,
@@ -1578,7 +1596,7 @@ async def analyze_endpoint(
         if not water_detected:
             # Provide more specific error message based on scene type with debug info
             debug_info = (
-                f" [Debug: {len(aggregated_detections)} aggregated detections, {len(inhouse_predictions)} inhouse predictions]"
+                f" [Debug: {len(aggregated_detections)} aggregated detections, {len(custom_model_predictions)} custom model predictions]"
                 if debug
                 else ""
             )
@@ -1668,7 +1686,7 @@ async def analyze_endpoint(
                     "variant_count": len(frames_for_aggregation),
                 },
                 "aggregation": aggregation_result,
-                "inhouse_predictions": inhouse_predictions,
+                "custom_model_predictions": custom_model_predictions,
                 "timeline": timeline,
                 "status": "no_water_detected",
                 "message": message,
@@ -1720,7 +1738,7 @@ async def analyze_endpoint(
                 "message": message,
                 "timeline": timeline,
                 "aggregation": aggregation_result,
-                "inhouse_predictions": inhouse_predictions,
+                "custom_model_predictions": custom_model_predictions,
                 "history_saved": history_enabled,
             }
             if user_analysis is not None:
@@ -1788,7 +1806,7 @@ async def analyze_endpoint(
                 "variant_count": len(frames_for_aggregation),
             },
             "aggregation": aggregation_result,
-            "inhouse_predictions": inhouse_predictions,
+            "custom_model_predictions": custom_model_predictions,
             "scores": scores,
             "timeline": timeline,
             "user_analysis": user_analysis,
@@ -1847,7 +1865,7 @@ async def analyze_endpoint(
             "timeline": timeline,
             "media": result_payload["media"],
             "aggregation": aggregation_result,
-            "inhouse_predictions": inhouse_predictions,
+            "custom_model_predictions": custom_model_predictions,
             "user_analysis": user_analysis,
             "filter_summary": filter_summary,
             "packaging": packaging_info,

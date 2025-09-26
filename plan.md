@@ -71,10 +71,9 @@ Use these exact resources for Places365 auto-download (required):
 │  └─ backend/
 │     ├─ __init__.py
 │     ├─ Models/
-│     │  ├─ InHouse/
+│     │  ├─ CustomModel/
 │     │  │  ├─ CLS.pt             # in-house fine-tuned YOLOv11 classification model (clean vs dirty)
-│     │  │  └─ OBB.pt             # in-house fine-tuned YOLOv11 object detection model (oriented bounding boxes)
-│     │  ├─ CustomModel/           # legacy model location (for backward compatibility)
+│     │  │  ├─ OBB.pt             # in-house fine-tuned YOLOv11 object detection model (oriented bounding boxes)
 │     │  │  ├─ Classification.pt   # alternative classification weights
 │     │  │  └─ ObjectDetection.pt  # alternative object detection weights
 │     │  ├─ Place365/
@@ -208,7 +207,7 @@ Notes:
 ## 4.3 `backend/Adapters/InModel.py` (adapter)
 
 - Responsibilities:
-  - Load two separate fine-tuned YOLOv11 models from `backend/Models/InHouse/`:
+  - Load two separate fine-tuned YOLOv11 models from `backend/Models/CustomModel/`:
     - `CLS.pt`: Water quality classification model ("bersih" vs "kotor")
     - `OBB.pt`: Object detection model with oriented bounding boxes
   - Provide `classify_water(image)` for water quality classification
