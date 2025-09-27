@@ -40,7 +40,6 @@ class RFDETRAdapter:
         cache_root = cache_root.resolve()
         print(f"[RFDETR] Cache directory: {cache_root}")
 
-        # Set multiple environment variables that RFDETR might check
         os.environ["RFD_MODEL_CACHE"] = str(cache_root)
         os.environ["RFDETR_CACHE_DIR"] = str(cache_root)
         os.environ["HF_HOME"] = str(cache_root)
@@ -59,6 +58,9 @@ class RFDETRAdapter:
             "m": RFDETRMedium,
         }
         model_cls = variant_map.get(variant_key, RFDETRMedium)
+        if model_cls is None:
+            print(f"[HydroScan] RF-DETR variant '{requested_variant}' is unavailable")
+            return
         self.model_variant = getattr(model_cls, "size", variant_key)
         print(
             f"[RFDETR] Requested variant '{requested_variant}' -> using {self.model_variant}"
@@ -90,7 +92,9 @@ class RFDETRAdapter:
                 except Exception:
                     pass
             if optimize and hasattr(model, "optimize_for_inference"):
-                model = model.optimize_for_inference()
+                optimized = model.optimize_for_inference()
+                if optimized is not None:
+                    model = optimized
             self.model = model
         except Exception as exc:
             print(f"[HydroScan] Failed to initialize RF-DETR model: {exc}")
@@ -168,18 +172,43 @@ class RFDETRAdapter:
 
     # ------------------------------------------------------------------
     def predict(
-        self, image: Image.Image, threshold: float = 0.5
+        self, image: Image.Image, threshold: float = 0.3  # Lower threshold
     ) -> List[Dict[str, Any]]:
         if self.model is None:
+            print("[RFDETR] Model not loaded")
             return []
         try:
+            print(
+                f"[RFDETR] Running inference with threshold {threshold} on image size {image.size}"
+            )
             detections = self.model.predict(image, threshold=threshold)
+            print(
+                f"[RFDETR] Raw detections type: {type(detections)}, content: {detections}"
+            )
+
             # RFDETRBase.predict returns a list; take first element for single-image inference
             if isinstance(detections, list) and detections:
+                print(f"[RFDETR] Taking first detection from list of {len(detections)}")
                 detections = detections[0]
-            return self._convert_predictions(detections)
+
+            print(f"[RFDETR] Processing detections: {type(detections)}")
+            if hasattr(detections, "xyxy"):
+                print(f"[RFDETR] Has xyxy: {getattr(detections, 'xyxy', None)}")
+            if hasattr(detections, "class_id"):
+                print(f"[RFDETR] Has class_id: {getattr(detections, 'class_id', None)}")
+            if hasattr(detections, "confidence"):
+                print(
+                    f"[RFDETR] Has confidence: {getattr(detections, 'confidence', None)}"
+                )
+
+            results = self._convert_predictions(detections)
+            print(f"[RFDETR] Found {len(results)} detections after conversion")
+            return results
         except Exception as exc:
             print(f"[HydroScan] RF-DETR inference failed: {exc}")
+            import traceback
+
+            traceback.print_exc()
             return []
 
     def predict_batch(

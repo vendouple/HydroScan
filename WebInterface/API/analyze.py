@@ -96,6 +96,64 @@ WATER_KEYWORDS = [
 ]
 
 
+def _summarize_classifications(predictions: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    summary: Dict[str, Any] = {
+        "samples": [],
+        "available": False,
+        "dirty_confidence": 0.0,
+        "clean_confidence": 0.0,
+        "dominant_label": None,
+    }
+
+    for pred in predictions:
+        if pred.get("detection_type") != "classification":
+            continue
+        label = (
+            pred.get("classification")
+            or pred.get("class")
+            or pred.get("class_name")
+            or ""
+        )
+        confidence = float(pred.get("confidence") or pred.get("score") or 0.0)
+        summary["samples"].append(
+            {
+                "label": label,
+                "confidence": confidence,
+                "frame_index": pred.get("frame_index"),
+                "source": pred.get("source"),
+            }
+        )
+        summary["available"] = True
+        lowered = str(label).lower()
+        if "kotor" in lowered or "dirty" in lowered:
+            summary["dirty_confidence"] = max(summary["dirty_confidence"], confidence)
+        elif "bersih" in lowered or "clean" in lowered:
+            summary["clean_confidence"] = max(summary["clean_confidence"], confidence)
+
+    if summary["available"]:
+        if summary["dirty_confidence"] >= summary["clean_confidence"]:
+            summary["dominant_label"] = "kotor"
+        else:
+            summary["dominant_label"] = "bersih"
+
+        summary["classification_confidence"] = (
+            max(summary["dirty_confidence"], summary["clean_confidence"]) * 100.0
+        )
+        if summary["dominant_label"] == "kotor":
+            summary["classification_score"] = max(
+                0.0, (1.0 - summary["dirty_confidence"]) * 40.0
+            )
+        else:
+            summary["classification_score"] = min(
+                100.0, 60.0 + summary["clean_confidence"] * 40.0
+            )
+    else:
+        summary["classification_confidence"] = 0.0
+        summary["classification_score"] = 50.0
+
+    return summary
+
+
 def _contains_water_keyword(name: str | None) -> bool:
     if not name:
         return False
@@ -183,6 +241,10 @@ def _load_user_input_adapter() -> UserInputAdapter:
     if _user_input_adapter is None:
         models_dir = MODELS_DIR / "UserInput"
         _user_input_adapter = UserInputAdapter(models_dir=str(models_dir))
+        if not getattr(_user_input_adapter, "available", False):
+            print(
+                f"[HydroScan] User input model unavailable: {_user_input_adapter.status}"
+            )
     return _user_input_adapter
 
 
@@ -193,6 +255,7 @@ def _prepare_user_input_analysis(
     normalized_external: Dict[str, Any],
     metrics_per_frame: List[Dict[str, float]],
     media_info: Dict[str, int],
+    classification_summary: Optional[Dict[str, Any]] = None,
 ) -> Tuple[
     Dict[str, Any],
     Dict[str, Any],
@@ -206,6 +269,7 @@ def _prepare_user_input_analysis(
         "external": normalized_external,
         "user_text": description,
         "media_info": media_info,
+        "classification_summary": classification_summary or {},
     }
 
     baseline_scores = compute_scores(score_context)
@@ -214,17 +278,30 @@ def _prepare_user_input_analysis(
     user_analysis: Optional[Dict[str, Any]] = None
     if description:
         adapter = _load_user_input_adapter()
-        assessment = adapter.analyze(
-            description,
-            {
-                "detections": aggregation_result.get("detections", []),
-                "top_detection": aggregation_result.get("top_detection", {}),
-                "visual_metrics": aggregation_result.get("metrics_avg", {}),
-                "external": normalized_external,
-                "scene": scene_majority,
-                "base_scores": baseline_scores,
-            },
-        )
+        if getattr(adapter, "available", False) and getattr(adapter, "_llama", None):
+            assessment = adapter.analyze(
+                description,
+                {
+                    "detections": aggregation_result.get("detections", []),
+                    "top_detection": aggregation_result.get("top_detection", {}),
+                    "visual_metrics": aggregation_result.get("metrics_avg", {}),
+                    "external": normalized_external,
+                    "scene": scene_majority,
+                    "base_scores": baseline_scores,
+                    "classification_summary": classification_summary or {},
+                },
+            )
+        else:
+            reason = getattr(adapter, "status", "User input model unavailable")
+            assessment = UserInputAssessment(
+                available=False,
+                conclusion="",
+                score=45.0,
+                confidence=35.0,
+                rationale=None,
+                model_name=getattr(adapter, "model_name", None),
+                reason=reason or "User input model unavailable",
+            )
         user_analysis = assessment.as_dict()
         score_context["user_text_assessment"] = user_analysis
 
@@ -375,11 +452,17 @@ def _serialize_for_json(data: Any) -> Any:
 def _run_detector(
     adapter: RFDETRAdapter | InModelAdapter, image: Image.Image, threshold: float
 ) -> List[Dict[str, Any]]:
+    adapter_name = type(adapter).__name__
+    print(f"[Analysis] Running {adapter_name} detection with threshold {threshold}")
+
     if isinstance(adapter, InModelAdapter):
         results = adapter.predict([image], conf=threshold)
-        return results[0] if results else []
+        detections = results[0] if results else []
+        print(f"[Analysis] {adapter_name} found {len(detections)} detections")
+        return detections
     if hasattr(adapter, "predict"):
         detections = adapter.predict(image, threshold=threshold)  # type: ignore[arg-type]
+        print(f"[Analysis] {adapter_name} found {len(detections or [])} detections")
         return detections or []
     raise RuntimeError("Adapter does not expose a compatible predict method")
 
@@ -671,8 +754,14 @@ def _dynamic_detection_pipeline(
                     metrics = compute_visual_metrics(variant_img)
 
                 try:
+                    print(
+                        f"[Analysis] Processing frame {idx} with filter '{friendly_name}'"
+                    )
                     detections = _run_detector(
                         detector, variant_img, DETECTOR_THRESHOLD
+                    )
+                    print(
+                        f"[Analysis] Frame {idx} ({friendly_name}): {len(detections)} detections found"
                     )
                 except Exception as exc:
                     detail = f"{friendly_name} failed for frame {idx}: {exc}"
@@ -744,8 +833,14 @@ def _dynamic_detection_pipeline(
 
             processed_ops.add(op)
 
+        print(
+            f"[Analysis] Aggregating {len(frames_for_aggregation)} frames from {len(processed_ops)} processing operations"
+        )
         aggregation_result = aggregate(frames_for_aggregation)
         detection_count, top_score = _evaluate_detection_confidence(aggregation_result)
+        print(
+            f"[Analysis] Aggregation complete: {detection_count} detections, top score: {top_score:.3f}"
+        )
 
         if (
             detection_count >= MIN_DETECTIONS_REQUIRED
@@ -1123,7 +1218,10 @@ async def analyze_endpoint(
                             total_steps=8,
                         )
                         fallback = _load_inmodel_adapter()
-                        if fallback.model is not None:
+                        if (
+                            fallback.models_loaded["classification"]
+                            or fallback.models_loaded["obb"]
+                        ):
                             detector = fallback
                             _append_timeline(
                                 timeline,
@@ -1143,7 +1241,10 @@ async def analyze_endpoint(
                 except Exception as exc:
                     _append_timeline(timeline, "outdoor_external", "error", str(exc))
                     fallback = _load_inmodel_adapter()
-                    if fallback.model is not None:
+                    if (
+                        fallback.models_loaded["classification"]
+                        or fallback.models_loaded["obb"]
+                    ):
                         detector = fallback
                         _append_timeline(
                             timeline,
@@ -1169,7 +1270,10 @@ async def analyze_endpoint(
                     total_steps=8,
                 )
                 fallback = _load_inmodel_adapter()
-                if fallback.model is not None:
+                if (
+                    fallback.models_loaded["classification"]
+                    or fallback.models_loaded["obb"]
+                ):
                     detector = fallback
                     _append_timeline(
                         timeline,
@@ -1310,7 +1414,10 @@ async def analyze_endpoint(
                         )
 
                         fallback_detector = _load_inmodel_adapter()
-                        if fallback_detector.model is not None:
+                        if (
+                            fallback_detector.models_loaded["classification"]
+                            or fallback_detector.models_loaded["obb"]
+                        ):
                             crop_results = fallback_detector.predict(
                                 list(packaging_crops), conf=DETECTOR_THRESHOLD
                             )
@@ -1388,8 +1495,12 @@ async def analyze_endpoint(
 
         # Get detailed In House Model predictions with bounding boxes
         custom_model_predictions = []
+        classification_summary = {"available": False, "samples": []}
         custom_model_adapter = _load_inmodel_adapter()
-        if custom_model_adapter.model is not None:
+        if (
+            custom_model_adapter.models_loaded["classification"]
+            or custom_model_adapter.models_loaded["obb"]
+        ):
             _append_timeline(
                 timeline,
                 "custom_model_analysis",
@@ -1432,12 +1543,21 @@ async def analyze_endpoint(
                             custom_model_predictions.append(obb_detection)
 
                         # Add classification results
-                        for classification in comprehensive_results.get(
+                        classifications_payload = comprehensive_results.get(
                             "classifications", []
+                        )
+                        if not classifications_payload and comprehensive_results.get(
+                            "classification"
                         ):
-                            classification["frame_index"] = frame_idx
-                            classification["detection_type"] = "classification"
-                            custom_model_predictions.append(classification)
+                            classifications_payload = [
+                                comprehensive_results["classification"]
+                            ]
+
+                        for classification in classifications_payload:
+                            classification_entry = classification.copy()
+                            classification_entry["frame_index"] = frame_idx
+                            classification_entry["detection_type"] = "classification"
+                            custom_model_predictions.append(classification_entry)
 
                     except Exception as comp_e:
                         print(
@@ -1462,6 +1582,8 @@ async def analyze_endpoint(
                     progress=7,
                     total_steps=8,
                 )
+
+        classification_summary = _summarize_classifications(custom_model_predictions)
 
         # Water confirmation logic (applies to all scenarios)
         if scene_majority == "outdoor":
@@ -1539,6 +1661,7 @@ async def analyze_endpoint(
                 },
                 "aggregation": aggregation_result,
                 "custom_model_predictions": custom_model_predictions,
+                "classification_summary": classification_summary,
                 "timeline": timeline,
                 "status": "non_water_brand",
                 "message": message,
@@ -1587,6 +1710,7 @@ async def analyze_endpoint(
                 "message": message,
                 "timeline": timeline,
                 "packaging": packaging_info,
+                "classification_summary": classification_summary,
                 "history_saved": history_enabled,
             }
             if not history_enabled:
@@ -1650,6 +1774,7 @@ async def analyze_endpoint(
                     normalized_external,
                     metrics_per_frame,
                     media_info,
+                    classification_summary,
                 )
                 if assessment and assessment.available:
                     _append_timeline(
@@ -1687,6 +1812,7 @@ async def analyze_endpoint(
                 },
                 "aggregation": aggregation_result,
                 "custom_model_predictions": custom_model_predictions,
+                "classification_summary": classification_summary,
                 "timeline": timeline,
                 "status": "no_water_detected",
                 "message": message,
@@ -1739,6 +1865,7 @@ async def analyze_endpoint(
                 "timeline": timeline,
                 "aggregation": aggregation_result,
                 "custom_model_predictions": custom_model_predictions,
+                "classification_summary": classification_summary,
                 "history_saved": history_enabled,
             }
             if user_analysis is not None:
@@ -1763,6 +1890,7 @@ async def analyze_endpoint(
                 normalized_external,
                 metrics_per_frame,
                 media_info,
+                classification_summary,
             )
         )
 
@@ -1813,6 +1941,7 @@ async def analyze_endpoint(
             "packaging": packaging_info,
             "packaging_water_hits": packaging_water_hits,
             "filter_summary": filter_summary,
+            "classification_summary": classification_summary,
             "history_saved": history_enabled,
             "debug": {
                 "enabled": debug_ctx.get("enabled"),
@@ -1870,6 +1999,7 @@ async def analyze_endpoint(
             "filter_summary": filter_summary,
             "packaging": packaging_info,
             "packaging_water_hits": packaging_water_hits,
+            "classification_summary": classification_summary,
             "history_saved": history_enabled,
         }
 

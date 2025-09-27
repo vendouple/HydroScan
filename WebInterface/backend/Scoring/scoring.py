@@ -12,6 +12,7 @@ DEFAULT_POTABILITY_WEIGHTS: Dict[str, float] = {
     "user_text": 10.0,
     "temporal": 10.0,
     "corroboration": 5.0,
+    "custom_classification": 15.0,
 }
 
 DEFAULT_CONFIDENCE_WEIGHTS: Dict[str, float] = {
@@ -20,6 +21,7 @@ DEFAULT_CONFIDENCE_WEIGHTS: Dict[str, float] = {
     "media_corroboration": 15.0,
     "external": 15.0,
     "user_text": 10.0,
+    "custom_classification": 10.0,
 }
 
 
@@ -165,12 +167,27 @@ def compute_scores(context: Dict[str, Any]) -> Dict[str, Any]:
     media_info: Dict[str, int] = context.get("media_info", {})
 
     user_assessment = context.get("user_text_assessment")
+    classification_summary = context.get("classification_summary") or {}
+    dirty_confidence = float(classification_summary.get("dirty_confidence") or 0.0)
+    clean_confidence = float(classification_summary.get("clean_confidence") or 0.0)
+    classification_available = bool(classification_summary.get("available"))
 
     external_score, external_confidence = _score_external(external)
     visual_score, image_quality_score = _score_visual_metrics(visual_avg)
     color_score = _score_color(visual_avg)
     model_confidence_score = _score_model_confidence(detections)
     temporal_score = _score_temporal(metrics_by_frame)
+
+    classification_score = 50.0
+    classification_confidence = 0.0
+    if classification_available:
+        classification_confidence = max(dirty_confidence, clean_confidence) * 100.0
+        if dirty_confidence >= clean_confidence:
+            classification_score = max(0.0, (1.0 - dirty_confidence) * 40.0)
+            model_confidence_score = min(model_confidence_score, classification_score)
+        else:
+            classification_score = min(100.0, 60.0 + clean_confidence * 40.0)
+            model_confidence_score = max(model_confidence_score, classification_score)
 
     user_text_active = False
     if isinstance(user_assessment, dict):
@@ -203,6 +220,7 @@ def compute_scores(context: Dict[str, Any]) -> Dict[str, Any]:
             "user_text" if user_text_active else None,
             "temporal",
             "corroboration",
+            "custom_classification" if classification_available else None,
         ],
     )
 
@@ -224,6 +242,9 @@ def compute_scores(context: Dict[str, Any]) -> Dict[str, Any]:
         "corroboration": ComponentScore(
             corroboration_score, potability_weights.get("corroboration", 0.0)
         ),
+        "custom_classification": ComponentScore(
+            classification_score, potability_weights.get("custom_classification", 0.0)
+        ),
     }
 
     potability_score = sum(
@@ -240,6 +261,7 @@ def compute_scores(context: Dict[str, Any]) -> Dict[str, Any]:
             "media_corroboration",
             "external" if external_confidence > 0 else None,
             "user_text" if user_text_active else None,
+            "custom_classification" if classification_available else None,
         ],
     )
 
@@ -259,12 +281,22 @@ def compute_scores(context: Dict[str, Any]) -> Dict[str, Any]:
         "user_text": ComponentScore(
             user_text_confidence, confidence_weights.get("user_text", 0.0)
         ),
+        "custom_classification": ComponentScore(
+            classification_confidence,
+            confidence_weights.get("custom_classification", 0.0),
+        ),
     }
 
     confidence_score = sum(
         component.weighted() for component in confidence_components.values()
     )
     confidence_score = _clamp(confidence_score)
+
+    classification_payload: Dict[str, Any] = classification_summary.copy()
+    classification_payload.setdefault("classification_score", classification_score)
+    classification_payload.setdefault(
+        "classification_confidence", classification_confidence
+    )
 
     return {
         "potability_score": potability_score,
@@ -280,4 +312,5 @@ def compute_scores(context: Dict[str, Any]) -> Dict[str, Any]:
                 for key, comp in confidence_components.items()
             },
         },
+        "classification_summary": classification_payload,
     }

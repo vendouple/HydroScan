@@ -341,7 +341,7 @@
             result.classifications.forEach((cls) => {
               content += `
                 <div class="detection-item">
-                  <strong>Class:</strong> ${cls.class}
+                  <strong>Class:</strong> ${cls.classification || cls.class}
                   <br><strong>Confidence:</strong> ${cls.confidence.toFixed(2)}
                 </div>
               `;
@@ -367,10 +367,14 @@
             result.obb_detections.forEach((det) => {
               content += `
                 <div class="detection-item">
-                  <strong>Class:</strong> ${det.class}
-                  <br><strong>Confidence:</strong> ${det.confidence.toFixed(2)}
-                  <br><strong>OBB:</strong> [${det.obb
-                    .map((v) => v.toFixed(1))
+                  <strong>Class:</strong> ${
+                    det.class_name || det.class || "Unknown"
+                  }
+                  <br><strong>Confidence:</strong> ${(
+                    det.confidence || 0
+                  ).toFixed(2)}
+                  <br><strong>OBB:</strong> [${(det.bbox || det.obb || [])
+                    .map((v) => (v || 0).toFixed(1))
                     .join(", ")}]
                 </div>
               `;
@@ -393,12 +397,20 @@
             </div>`;
           }
 
-          if (result.detections && result.detections.length > 0) {
+          // Check for detections in different response structures
+          const detections =
+            result.detections ||
+            (result.raw_comprehensive && result.raw_comprehensive.detections) ||
+            [];
+
+          if (detections && detections.length > 0) {
             content = '<div class="detection-info">';
-            result.detections.forEach((det) => {
+            detections.forEach((det) => {
               content += `
                 <div class="detection-item">
-                  <strong>Class:</strong> ${det.class_name || det.class}
+                  <strong>Class:</strong> ${
+                    det.class_name || det.class || "Unknown"
+                  }
                   <br><strong>Confidence:</strong> ${(
                     det.score ||
                     det.confidence ||

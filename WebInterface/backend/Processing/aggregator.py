@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Dict, Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 
 def _iou(box_a: List[float], box_b: List[float]) -> float:
@@ -31,25 +31,51 @@ def _merge_detections(
     variant: str | None,
     iou_threshold: float = 0.5,
 ) -> List[Dict[str, Any]]:
+    def _score(det: Dict[str, Any]) -> float:
+        candidate = det.get("score")
+        if candidate is None:
+            candidate = det.get("confidence")
+        if candidate is None:
+            candidate = det.get("probability")
+        try:
+            return float(candidate)
+        except Exception:
+            return 0.0
+
     for det in new_detections:
         bbox = det.get("bbox") or det.get("box")
         if not bbox:
             continue
 
+        # Convert OBB (8-element) to regular bbox (4-element) if needed
+        if len(bbox) == 8:
+            # OBB format: [x1, y1, x2, y2, x3, y3, x4, y4] -> convert to [x_min, y_min, x_max, y_max]
+            x_coords = [bbox[0], bbox[2], bbox[4], bbox[6]]
+            y_coords = [bbox[1], bbox[3], bbox[5], bbox[7]]
+            bbox = [min(x_coords), min(y_coords), max(x_coords), max(y_coords)]
+            det["bbox"] = bbox  # Update the detection with converted bbox
+
         matched = False
         for agg in aggregated:
             if agg.get("class_id") != det.get("class_id"):
                 continue
-            if _iou(agg.get("bbox", []), bbox) >= iou_threshold:
-                agg["score"] = max(
-                    float(agg.get("score", 0.0)), float(det.get("score", 0.0))
-                )
+            agg_bbox = agg.get("bbox", [])
+            # Convert aggregated bbox if needed
+            if len(agg_bbox) == 8:
+                x_coords = [agg_bbox[0], agg_bbox[2], agg_bbox[4], agg_bbox[6]]
+                y_coords = [agg_bbox[1], agg_bbox[3], agg_bbox[5], agg_bbox[7]]
+                agg_bbox = [min(x_coords), min(y_coords), max(x_coords), max(y_coords)]
+                agg["bbox"] = agg_bbox
+
+            if _iou(agg_bbox, bbox) >= iou_threshold:
+                det_score = _score(det)
+                agg["score"] = max(float(agg.get("score", 0.0)), det_score)
                 occurrences = agg.setdefault("occurrences", [])
                 occurrences.append(
                     {
                         "frame_index": frame_index,
                         "variant": variant,
-                        "score": float(det.get("score", 0.0)),
+                        "score": det_score,
                         "source": det.get("source"),
                     }
                 )
@@ -57,18 +83,19 @@ def _merge_detections(
                 break
 
         if not matched:
+            det_score = _score(det)
             aggregated.append(
                 {
                     "bbox": bbox,
                     "class_id": det.get("class_id"),
                     "class_name": det.get("class_name") or det.get("label"),
-                    "score": float(det.get("score", 0.0)),
+                    "score": det_score,
                     "source": det.get("source"),
                     "occurrences": [
                         {
                             "frame_index": frame_index,
                             "variant": variant,
-                            "score": float(det.get("score", 0.0)),
+                            "score": det_score,
                             "source": det.get("source"),
                         }
                     ],

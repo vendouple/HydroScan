@@ -1,0 +1,7 @@
+path: /Images/
+train: train
+val: Val
+names:
+  0: Clean
+  1: Dirty
+  3: NotWater

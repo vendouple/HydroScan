@@ -89,13 +89,9 @@ async def test_rfdetr(image: Image.Image) -> Dict[str, Any]:
         from WebInterface.backend.Adapters.RFDETR import RFDETRAdapter
 
         adapter = RFDETRAdapter()
-        results = adapter.predict([image])
+        detections = adapter.predict(image, threshold=0.3)  # Lower threshold
 
-        if results and len(results) > 0:
-            detections = results[0]
-            return {"success": True, "detections": detections, "count": len(detections)}
-        else:
-            return {"success": True, "detections": [], "count": 0}
+        return {"success": True, "detections": detections, "count": len(detections)}
 
     except Exception as e:
         return {

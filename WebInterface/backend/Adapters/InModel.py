@@ -184,6 +184,7 @@ class InModelAdapter:
                 "success": True,
                 "classification": classification,
                 "confidence": confidence,
+                "score": confidence,
                 "class_id": int(top_idx),
             }
 
@@ -250,11 +251,13 @@ class InModelAdapter:
                             ),
                         )
 
+                        score = float(conf_val)
                         detection = {
                             "bbox": box.flatten().tolist(),  # 8 coordinates for OBB
                             "class_id": int(cls_id),
                             "class_name": class_name,
-                            "confidence": float(conf_val),
+                            "confidence": score,
+                            "score": score,
                             "source": "inmodel_obb",
                             "type": "obb",
                         }
@@ -282,11 +285,13 @@ class InModelAdapter:
                             ),
                         )
 
+                        score = float(conf_val)
                         detection = {
                             "bbox": box.tolist(),  # 4 coordinates for regular bbox
                             "class_id": int(cls_id),
                             "class_name": class_name,
-                            "confidence": float(conf_val),
+                            "confidence": score,
+                            "score": score,
                             "source": "inmodel_detection",
                             "type": "bbox",
                         }
@@ -313,6 +318,7 @@ class InModelAdapter:
         results = {
             "success": False,
             "classification": {},
+            "classifications": [],
             "detections": [],
             "combined_confidence": 0.0,
             "model_status": self.models_loaded.copy(),
@@ -322,6 +328,16 @@ class InModelAdapter:
         classification_result = self.classify_water(image, conf)
         if classification_result["success"]:
             results["classification"] = classification_result
+            classification_entry = {
+                "classification": classification_result.get("classification"),
+                "class": classification_result.get("classification"),
+                "class_name": classification_result.get("classification"),
+                "confidence": classification_result.get("confidence", 0.0),
+                "score": classification_result.get("confidence", 0.0),
+                "class_id": classification_result.get("class_id"),
+                "source": "inmodel_classification",
+            }
+            results["classifications"] = [classification_entry]
             results["success"] = True
 
         # Run object detection
