@@ -1,4 +1,0 @@
-names: ['Clean', 'Dirty', 'NotWater']
-nc: 3
-train: D:\dev\Github\HydroScan\InHouseModelTraining\Classification\Images\train
-val: D:\dev\Github\HydroScan\InHouseModelTraining\Classification\Images\val

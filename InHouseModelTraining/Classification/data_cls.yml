@@ -1,0 +1,4 @@
+names: ["Clean", "Dirty", "NotWater"]
+nc: 3
+train: C:/Users/PC/Desktop/HydroScan/InHouseModelTraining/Classification/Images/train
+val: C:/Users/PC/Desktop/HydroScan/InHouseModelTraining/Classification/Images/val
