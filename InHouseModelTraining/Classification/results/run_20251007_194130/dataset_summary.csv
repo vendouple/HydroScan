@@ -1,0 +1,7 @@
+split,class,count,percentage
+train,Clean,204,35.23
+train,Dirty,128,22.11
+train,NotWater,247,42.66
+val,Clean,88,35.34
+val,Dirty,55,22.09
+val,NotWater,106,42.57

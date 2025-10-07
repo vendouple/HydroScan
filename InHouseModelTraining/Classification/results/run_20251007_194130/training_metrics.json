@@ -1,0 +1,12 @@
+{
+  "time": 705.304,
+  "train/loss": 0.08249,
+  "metrics/accuracy_top1": 0.89558,
+  "metrics/accuracy_top5": 1.0,
+  "val/loss": 0.43103,
+  "lr/pg0": 0.0002625,
+  "lr/pg1": 0.0002625,
+  "lr/pg2": 0.0002625,
+  "best_top1_epoch": 21.0,
+  "best_top1": 0.90763
+}
