@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Tuple
+from statistics import median
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 DEFAULT_POTABILITY_WEIGHTS: Dict[str, float] = {
@@ -22,6 +23,21 @@ DEFAULT_CONFIDENCE_WEIGHTS: Dict[str, float] = {
     "external": 15.0,
     "user_text": 10.0,
     "custom_classification": 10.0,
+}
+
+DIRTY_KEYWORDS = {
+    "dirty",
+    "murky",
+    "pollut",
+    "foam",
+    "oil",
+    "sheen",
+    "algae",
+    "scum",
+    "trash",
+    "waste",
+    "sewage",
+    "contamin",
 }
 
 
@@ -63,6 +79,20 @@ def _normalize_weights(
 
 def _clamp(value: float, lower: float = 0.0, upper: float = 100.0) -> float:
     return float(max(lower, min(upper, value)))
+
+
+def _normalize_probability(value: Any) -> Optional[float]:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric < 0.0:
+        numeric = 0.0
+    if numeric > 1.5:
+        numeric = numeric / 100.0
+    if numeric > 1.0:
+        numeric = 1.0
+    return numeric
 
 
 def _score_user_text(text: str | None) -> Tuple[float, float]:
@@ -128,8 +158,41 @@ def _score_color(visual_avg: Dict[str, float]) -> float:
 def _score_model_confidence(detections: List[Dict[str, Any]]) -> float:
     if not detections:
         return 40.0
-    mean_score = sum(det.get("score", 0.0) for det in detections) / len(detections)
-    return _clamp(mean_score * 100.0)
+
+    scores: List[float] = []
+    for det in detections:
+        value = det.get("score")
+        if value is None:
+            value = det.get("confidence")
+        prob = _normalize_probability(value)
+        if prob is None:
+            continue
+        scores.append(_clamp(prob * 100.0))
+
+    if not scores:
+        return 40.0
+
+    top_score = max(scores)
+    median_score = median(scores)
+    blended = 0.7 * top_score + 0.3 * median_score
+    return _clamp(blended)
+
+
+def _dirty_signal_from_detections(detections: List[Dict[str, Any]]) -> float:
+    best = 0.0
+    for det in detections:
+        name = str(
+            det.get("class_name") or det.get("label") or det.get("classification") or ""
+        ).lower()
+        if not any(keyword in name for keyword in DIRTY_KEYWORDS):
+            continue
+        prob = _normalize_probability(
+            det.get("score") or det.get("confidence") or det.get("probability")
+        )
+        if prob is None:
+            continue
+        best = max(best, prob)
+    return max(0.0, min(1.0, best))
 
 
 def _score_temporal(metrics_by_frame: List[Dict[str, float]]) -> float:
@@ -161,6 +224,7 @@ def _score_corroboration(
 def compute_scores(context: Dict[str, Any]) -> Dict[str, Any]:
     visual_avg: Dict[str, float] = context.get("visual_avg", {})
     detections: List[Dict[str, Any]] = context.get("detections", [])
+    top_detection: Dict[str, Any] = context.get("top_detection", {}) or {}
     metrics_by_frame: List[Dict[str, float]] = context.get("metrics_by_frame", [])
     external: Dict[str, Any] | None = context.get("external")
     user_text: str | None = context.get("user_text")
@@ -188,6 +252,29 @@ def compute_scores(context: Dict[str, Any]) -> Dict[str, Any]:
         else:
             classification_score = min(100.0, 60.0 + clean_confidence * 40.0)
             model_confidence_score = max(model_confidence_score, classification_score)
+
+    detection_dirty_signal = _dirty_signal_from_detections(detections)
+    top_name = str(
+        top_detection.get("class_name")
+        or top_detection.get("label")
+        or top_detection.get("classification")
+        or ""
+    ).lower()
+    if any(keyword in top_name for keyword in DIRTY_KEYWORDS):
+        top_detection_prob = _normalize_probability(top_detection.get("score"))
+        if top_detection_prob is not None:
+            detection_dirty_signal = max(detection_dirty_signal, top_detection_prob)
+
+    dirty_signal = max(dirty_confidence, detection_dirty_signal)
+
+    if dirty_signal > 0.0:
+        suppression = max(0.0, 1.0 - dirty_signal)
+        visual_cap = suppression * 50.0
+        color_cap = suppression * 60.0
+        visual_score = min(visual_score, _clamp(visual_cap))
+        color_score = min(color_score, _clamp(color_cap))
+        if dirty_signal >= 0.6:
+            temporal_score = min(temporal_score, _clamp(suppression * 70.0))
 
     user_text_active = False
     if isinstance(user_assessment, dict):
@@ -253,6 +340,10 @@ def compute_scores(context: Dict[str, Any]) -> Dict[str, Any]:
     potability_score = _clamp(potability_score)
     band_label = _band_from_score(potability_score)
 
+    if dirty_signal >= 0.6:
+        potability_score = min(potability_score, _clamp((1.0 - dirty_signal) * 35.0))
+        band_label = _band_from_score(potability_score)
+
     confidence_weights = _normalize_weights(
         DEFAULT_CONFIDENCE_WEIGHTS,
         [
@@ -292,6 +383,17 @@ def compute_scores(context: Dict[str, Any]) -> Dict[str, Any]:
     )
     confidence_score = _clamp(confidence_score)
 
+    agreement_votes = 0
+    if dirty_confidence >= 0.6:
+        agreement_votes += 1
+    if detection_dirty_signal >= 0.6:
+        agreement_votes += 1
+    if user_text_active and user_text_score <= 40.0:
+        agreement_votes += 1
+    if agreement_votes >= 2:
+        confidence_score = max(confidence_score, 60.0 + agreement_votes * 10.0)
+        confidence_score = _clamp(confidence_score)
+
     classification_payload: Dict[str, Any] = classification_summary.copy()
     classification_payload.setdefault("classification_score", classification_score)
     classification_payload.setdefault(
@@ -313,4 +415,10 @@ def compute_scores(context: Dict[str, Any]) -> Dict[str, Any]:
             },
         },
         "classification_summary": classification_payload,
+        "signals": {
+            "dirty_signal": dirty_signal,
+            "detection_dirty_signal": detection_dirty_signal,
+            "dirty_confidence": dirty_confidence,
+            "confidence_agreement_votes": agreement_votes,
+        },
     }

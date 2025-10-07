@@ -59,6 +59,10 @@ MAX_FRAMES_PER_VIDEO = int(os.environ.get("HYDROSCAN_MAX_FRAMES_PER_VIDEO", "250
 FRAME_DIFF_THRESHOLD = float(os.environ.get("HYDROSCAN_FRAME_DIFF_THRESHOLD", "18.0"))
 TOP_DETECTION_TARGET = float(os.environ.get("HYDROSCAN_TOP_DETECTION_TARGET", "0.6"))
 MIN_DETECTIONS_REQUIRED = int(os.environ.get("HYDROSCAN_MIN_DETECTIONS", "1"))
+AVG_DETECTION_TARGET = float(os.environ.get("HYDROSCAN_AVG_DETECTION_TARGET", "0.75"))
+HIGH_DETECTION_THRESHOLD = float(
+    os.environ.get("HYDROSCAN_HIGH_DETECTION_THRESHOLD", "0.9")
+)
 
 DEBUG_SNAPSHOT_CATEGORIES = ("scene", "filters", "detector", "ocr")
 KNOWN_WATER_BRANDS = {
@@ -265,6 +269,7 @@ def _prepare_user_input_analysis(
     score_context = {
         "visual_avg": aggregation_result.get("metrics_avg", {}),
         "detections": aggregation_result.get("detections", []),
+        "top_detection": aggregation_result.get("top_detection", {}),
         "metrics_by_frame": metrics_per_frame,
         "external": normalized_external,
         "user_text": description,
@@ -278,7 +283,7 @@ def _prepare_user_input_analysis(
     user_analysis: Optional[Dict[str, Any]] = None
     if description:
         adapter = _load_user_input_adapter()
-        if getattr(adapter, "available", False) and getattr(adapter, "_llama", None):
+        if getattr(adapter, "available", False):
             assessment = adapter.analyze(
                 description,
                 {
@@ -296,8 +301,8 @@ def _prepare_user_input_analysis(
             assessment = UserInputAssessment(
                 available=False,
                 conclusion="",
-                score=45.0,
-                confidence=35.0,
+                score=0.0,
+                confidence=0.0,
                 rationale=None,
                 model_name=getattr(adapter, "model_name", None),
                 reason=reason or "User input model unavailable",
@@ -501,7 +506,12 @@ def _annotate_detections(
             label = f"{label} {score:.2f}"
 
         if font:
-            text_width, text_height = draw.textsize(label, font=font)
+            try:
+                text_bbox = draw.textbbox((0, 0), label, font=font)
+                text_width = text_bbox[2] - text_bbox[0]
+                text_height = text_bbox[3] - text_bbox[1]
+            except AttributeError:  # pragma: no cover - Pillow < 8
+                text_width, text_height = draw.textsize(label, font=font)
         else:  # pragma: no cover - extremely rare path
             text_width, text_height = len(label) * 6, 10
 
@@ -601,11 +611,20 @@ def _save_debug_snapshot(
     return entry
 
 
-def _evaluate_detection_confidence(aggregation: Dict[str, Any]) -> Tuple[int, float]:
+def _evaluate_detection_confidence(
+    aggregation: Dict[str, Any],
+) -> Tuple[int, float, float]:
     detections = aggregation.get("detections", []) or []
     top = aggregation.get("top_detection") or {}
     top_score = float(top.get("score", 0.0) or 0.0)
-    return len(detections), top_score
+    scores: List[float] = []
+    for det in detections:
+        try:
+            scores.append(float(det.get("score") or det.get("confidence") or 0.0))
+        except Exception:
+            continue
+    avg_score = sum(scores) / len(scores) if scores else 0.0
+    return len(detections), top_score, avg_score
 
 
 def _analyze_packaging(aggregation: Dict[str, Any]) -> Dict[str, Any]:
@@ -837,20 +856,22 @@ def _dynamic_detection_pipeline(
             f"[Analysis] Aggregating {len(frames_for_aggregation)} frames from {len(processed_ops)} processing operations"
         )
         aggregation_result = aggregate(frames_for_aggregation)
-        detection_count, top_score = _evaluate_detection_confidence(aggregation_result)
+        detection_count, top_score, avg_score = _evaluate_detection_confidence(
+            aggregation_result
+        )
         print(
-            f"[Analysis] Aggregation complete: {detection_count} detections, top score: {top_score:.3f}"
+            f"[Analysis] Aggregation complete: {detection_count} detections, top score: {top_score:.3f}, avg score: {avg_score:.3f}"
         )
 
-        if (
-            detection_count >= MIN_DETECTIONS_REQUIRED
-            and top_score >= TOP_DETECTION_TARGET
+        if detection_count >= MIN_DETECTIONS_REQUIRED and (
+            avg_score >= AVG_DETECTION_TARGET
+            or top_score >= max(TOP_DETECTION_TARGET, HIGH_DETECTION_THRESHOLD)
         ):
             _append_timeline(
                 timeline,
                 "detector_inference",
                 "done",
-                f"Detections={detection_count}, top={top_score:.2f}",
+                f"Detections={detection_count}, top={top_score:.2f}, avg={avg_score:.2f}",
             )
             break
 
@@ -860,7 +881,7 @@ def _dynamic_detection_pipeline(
                 timeline,
                 "detector_inference",
                 status,
-                f"Detections={detection_count}, top={top_score:.2f}",
+                f"Detections={detection_count}, top={top_score:.2f}, avg={avg_score:.2f}",
             )
             break
 
@@ -878,7 +899,7 @@ def _dynamic_detection_pipeline(
                 timeline,
                 "detector_inference",
                 "warning",
-                "Unable to apply additional filters",
+                "Unable to apply additional filters before reaching confidence target",
             )
             break
 
@@ -886,6 +907,9 @@ def _dynamic_detection_pipeline(
         "applied": applied_ops,
         "target_score": TOP_DETECTION_TARGET,
         "min_detections": MIN_DETECTIONS_REQUIRED,
+        "avg_confidence_target": AVG_DETECTION_TARGET,
+        "final_top_score": top_score,
+        "final_avg_score": avg_score,
     }
 
     return frames_for_aggregation, metrics_per_frame, aggregation_result, filter_summary

@@ -46,9 +46,16 @@ class InModelAdapter:
 
     # Classification labels for water quality
     CLASSIFICATION_LABELS = {
-        0: "bersih",  # Clean water
-        1: "kotor",  # Dirty/polluted water
+        0: "Clean",  # Clean water
+        1: "Dirty",  # Dirty/polluted water
+        2: "NotWater",  # Unknown/uncertain
     }
+
+    # Thresholds / IDs for classification post-processing
+    NOT_WATER_CLASS_ID = 2
+    NOT_WATER_CONFIDENCE_THRESHOLD = (
+        0.70  # 70% confidence => treat as "no water detected"
+    )
 
     def __init__(self, models_dir: Optional[str] = None, device: Optional[str] = None):
         """
@@ -175,17 +182,60 @@ class InModelAdapter:
                     "confidence": 0.0,
                 }
 
-            # Get top prediction
-            top_idx = probs.top1
-            confidence = float(probs.top1conf)
-            classification = self.CLASSIFICATION_LABELS.get(top_idx, "unknown")
+            prob_tensor = getattr(probs, "data", None)
+            if prob_tensor is None:
+                prob_tensor = probs
+
+            prob_values: List[float] = []
+            if hasattr(prob_tensor, "cpu"):
+                try:
+                    prob_values = prob_tensor.cpu().numpy().tolist()  # type: ignore[attr-defined]
+                except Exception:
+                    prob_values = [float(x) for x in list(prob_tensor)]
+            else:
+                prob_values = [float(x) for x in list(prob_tensor)]
+
+            if not prob_values:
+                return {
+                    "success": False,
+                    "error": "Probability vector empty",
+                    "classification": "unknown",
+                    "confidence": 0.0,
+                }
+
+            breakdown = []
+            probabilities: Dict[str, float] = {}
+            for idx, value in enumerate(prob_values):
+                label = self.CLASSIFICATION_LABELS.get(idx, f"class_{idx}")
+                score = float(value)
+                percent = round(score * 100.0, 2)
+                probabilities[label] = score
+                breakdown.append(
+                    {
+                        "class_id": idx,
+                        "class_name": label,
+                        "score": score,
+                        "percent": percent,
+                    }
+                )
+
+            breakdown.sort(key=lambda item: item["score"], reverse=True)
+            top_entry = breakdown[0]
+            top_idx = int(top_entry["class_id"])
+            confidence = float(top_entry["score"])
+            classification = top_entry["class_name"]
+            confidence_percent = top_entry["percent"]
 
             return {
                 "success": True,
                 "classification": classification,
                 "confidence": confidence,
+                "confidence_percent": confidence_percent,
+                "confidence_label": f"{confidence_percent:.1f}%",
                 "score": confidence,
-                "class_id": int(top_idx),
+                "class_id": top_idx,
+                "probabilities": probabilities,
+                "probability_breakdown": breakdown,
             }
 
         except Exception as e:
@@ -257,6 +307,7 @@ class InModelAdapter:
                             "class_id": int(cls_id),
                             "class_name": class_name,
                             "confidence": score,
+                            "confidence_percent": round(score * 100.0, 2),
                             "score": score,
                             "source": "inmodel_obb",
                             "type": "obb",
@@ -291,6 +342,7 @@ class InModelAdapter:
                             "class_id": int(cls_id),
                             "class_name": class_name,
                             "confidence": score,
+                            "confidence_percent": round(score * 100.0, 2),
                             "score": score,
                             "source": "inmodel_detection",
                             "type": "bbox",
@@ -322,12 +374,18 @@ class InModelAdapter:
             "detections": [],
             "combined_confidence": 0.0,
             "model_status": self.models_loaded.copy(),
+            "probability_breakdown": [],
+            "water_found": True,
+            "no_water_reason": None,
         }
 
         # Run classification
         classification_result = self.classify_water(image, conf)
         if classification_result["success"]:
             results["classification"] = classification_result
+            results["probability_breakdown"] = classification_result.get(
+                "probability_breakdown", []
+            )
             classification_entry = {
                 "classification": classification_result.get("classification"),
                 "class": classification_result.get("classification"),
@@ -335,10 +393,26 @@ class InModelAdapter:
                 "confidence": classification_result.get("confidence", 0.0),
                 "score": classification_result.get("confidence", 0.0),
                 "class_id": classification_result.get("class_id"),
+                "confidence_percent": classification_result.get("confidence_percent"),
+                "probability_breakdown": classification_result.get(
+                    "probability_breakdown", []
+                ),
                 "source": "inmodel_classification",
             }
             results["classifications"] = [classification_entry]
             results["success"] = True
+
+            # Determine if we should mark "no water" based on NotWater prediction
+            if (
+                classification_result.get("class_id") == self.NOT_WATER_CLASS_ID
+                and classification_result.get("confidence", 0.0)
+                >= self.NOT_WATER_CONFIDENCE_THRESHOLD
+            ):
+                results["water_found"] = False
+                results["no_water_reason"] = (
+                    "Classification predicted 'NotWater' with "
+                    f"{classification_result.get('confidence_percent', 0.0):.1f}% confidence."
+                )
 
         # Run object detection
         detection_result = self.detect_objects(image, conf, iou)
@@ -389,9 +463,28 @@ class InModelAdapter:
         # Process classification results
         if results["classification"]:
             cls_result = results["classification"]
-            status.append(
-                f"🏷️ [2] Water classification: {cls_result['classification']} (confidence: {cls_result['confidence']:.2f})"
+            confidence_percent = cls_result.get(
+                "confidence_percent", cls_result.get("confidence", 0.0) * 100.0
             )
+            status.append(
+                "🏷️ [2] Water classification: "
+                f"{cls_result['classification']} ({confidence_percent:.1f}%)"
+            )
+
+            probability_breakdown = cls_result.get("probability_breakdown", [])
+            if probability_breakdown:
+                status.append("📈 [2a] Class confidence breakdown:")
+                for entry in probability_breakdown:
+                    status.append(
+                        f"   • {entry['class_name']}: {entry['percent']:.1f}%"
+                    )
+
+            if results.get("water_found") is False:
+                reason = results.get("no_water_reason")
+                status.append(
+                    "🚫 [2b] Model is confident this image is not water."
+                    + (f" {reason}" if reason else "")
+                )
         else:
             status.append("🏷️ [2] Classification model not available")
 
@@ -412,25 +505,47 @@ class InModelAdapter:
                     for j in range(0, 8, 2)
                 ]
                 draw.polygon(points, outline="red", width=2)
-                label = f"{detection['class_name']} {detection['confidence']:.2f}"
+                label = (
+                    f"{detection['class_name']} {detection['confidence_percent']:.1f}%"
+                )
                 draw.text((points[0][0], points[0][1] - 15), label, fill="red")
             else:
                 # Regular bounding box - 4 coordinates
                 bbox = detection["bbox"]
                 x1, y1, x2, y2 = [int(coord) for coord in bbox]
                 draw.rectangle([x1, y1, x2, y2], outline="green", width=2)
-                label = f"{detection['class_name']} {detection['confidence']:.2f}"
+                label = (
+                    f"{detection['class_name']} {detection['confidence_percent']:.1f}%"
+                )
                 draw.text((x1, max(y1 - 15, 0)), label, fill="green")
 
         # Build final result
-        result_dict = {}
+        result_dict: Dict[str, float] = {}
         if results["classification"]:
             cls_result = results["classification"]
-            result_dict[cls_result["classification"]] = cls_result["confidence"]
+            probability_breakdown = cls_result.get("probability_breakdown", [])
+
+            # Populate per-class scores and percentages for readability
+            for entry in probability_breakdown:
+                result_dict[entry["class_name"]] = entry["score"]
+                result_dict[f"{entry['class_name']}_percent"] = entry["percent"]
+
+            result_dict["TopClassification"] = cls_result["classification"]
+            result_dict["TopConfidence"] = cls_result.get("confidence", 0.0)
+            result_dict["TopConfidencePercent"] = cls_result.get(
+                "confidence_percent", cls_result.get("confidence", 0.0) * 100.0
+            )
+
+        result_dict["WaterFound"] = bool(results.get("water_found", True))
+        if results.get("no_water_reason"):
+            result_dict["NoWaterReason"] = results["no_water_reason"]
 
         # Add combined confidence
         if results["combined_confidence"] > 0:
             result_dict["Combined_Confidence"] = results["combined_confidence"]
+            result_dict["Combined_ConfidencePercent"] = round(
+                results["combined_confidence"] * 100.0, 2
+            )
 
         status.append(
             f"✅ [4] Analysis complete. Combined confidence: {results['combined_confidence']:.2f}"

@@ -11,3 +11,4 @@ __init__.py
 #ignore history file
 history/
 *.pth
+*.env
