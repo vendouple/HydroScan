@@ -8,14 +8,19 @@
   </head>
   <body>
     <header class="hero">
-      <h1>HydroScan</h1>
+      <a href="/" style="text-decoration: none; color: inherit;">
+        <h1>💧 HydroScan</h1>
+      </a>
       <p class="subtitle">
-        Local-first water safety insights powered by computer vision and
-        regional data.
+        AI-powered water quality analysis using computer vision. 
+        Upload photos or videos of water sources for instant safety insights.
       </p>
       <div style="margin-top: 16px">
         <a href="/model-lab" class="btn ghost" style="text-decoration: none">
           🔬 Model Lab
+        </a>
+        <a href="/" class="btn ghost" style="text-decoration: none; margin-left: 8px;">
+          🏠 Home
         </a>
       </div>
     </header>
@@ -23,15 +28,15 @@
     <main id="layout">
       <section class="card input-card">
         <div class="card-header">
-          <h2>Submit media</h2>
+          <h2>📤 Upload Media</h2>
           <p class="card-subtitle">
-            Up to 25 images and 5 videos (≤ 60 seconds each). Describe smell,
-            color, feel, temperature.
+            Capture water samples with your camera. Upload up to 25 images or 5 short videos.
+            Add observations like smell, color, and temperature for better analysis.
           </p>
         </div>
         <form id="analyze-form" autocomplete="off">
           <label class="field">
-            <span class="label">Media (images / videos)</span>
+            <span class="label">📷 Photos & Videos</span>
             <input
               type="file"
               id="files"
@@ -42,28 +47,28 @@
           </label>
 
           <label class="field">
-            <span class="label">Observation notes (Optional)</span>
+            <span class="label">📝 Your Observations (Optional)</span>
             <textarea
               id="description"
               name="description"
               rows="4"
-              placeholder="Example: Slight smell of chlorine, light green tint, feels slippery..."></textarea>
+              placeholder="Describe what you notice: Does it smell? What color is it? Is it cloudy or clear? Any visible particles?"></textarea>
           </label>
 
           <div class="grid two">
             <label class="field">
-              <span class="label">Latitude (optional)</span>
-              <input type="number" id="lat" name="lat" step="any" />
+              <span class="label">📍 Latitude</span>
+              <input type="number" id="lat" name="lat" step="any" placeholder="e.g. -6.2088" />
             </label>
             <label class="field">
-              <span class="label">Longitude (optional)</span>
-              <input type="number" id="lon" name="lon" step="any" />
+              <span class="label">📍 Longitude</span>
+              <input type="number" id="lon" name="lon" step="any" placeholder="e.g. 106.8456" />
             </label>
           </div>
 
           <div class="location-row">
             <button type="button" class="ghost" id="locate-btn">
-              Use my location
+              📌 Use My Current Location
             </button>
             <span class="location-status" id="location-status"
               >Location not set</span
@@ -86,28 +91,28 @@
           </label>
 
           <div class="actions">
-            <button type="submit" id="analyze-btn">Analyze</button>
-            <button type="reset" id="reset-btn">Clear</button>
+            <button type="submit" id="analyze-btn">🔍 Analyze Water</button>
+            <button type="reset" id="reset-btn">🗑️ Clear</button>
           </div>
         </form>
 
         <div class="disclaimer">
-          HydroScan provides informational analysis only and is not a substitute
-          for laboratory testing or public health advice. This is a prototype.
+          ⚠️ HydroScan is for informational purposes only. Always consult local authorities 
+          or conduct laboratory testing for official water safety assessments.
         </div>
       </section>
 
       <section class="card timeline-card" id="timeline-card">
         <div class="card-header">
-          <h2>Analysis timeline</h2>
+          <h2>⏱️ Analysis Progress</h2>
           <span class="analysis-id" id="analysis-id">No analysis yet</span>
         </div>
         <ul class="timeline" id="timeline">
           <li class="timeline-item idle">
             <div class="marker"></div>
             <div class="content">
-              <p class="title">Waiting for upload</p>
-              <p class="detail">Start an analysis to view processing stages.</p>
+              <p class="title">Ready to analyze</p>
+              <p class="detail">Upload media above and click "Analyze Water" to begin.</p>
             </div>
           </li>
         </ul>
@@ -115,30 +120,30 @@
 
       <section class="card history-card" id="history-card">
         <div class="card-header">
-          <h2>Recent analyses</h2>
+          <h2>📋 Recent Analyses</h2>
           <button type="button" class="ghost" id="refresh-history">
-            Refresh
+            🔄 Refresh
           </button>
         </div>
         <p class="history-empty" id="history-empty">
-          History is empty. Analyses saved to disk will appear here.
+          No analyses yet. Your saved results will appear here.
         </p>
         <ul class="history-list" id="history-list"></ul>
       </section>
 
       <section class="card results-card hidden" id="results-card">
         <div class="card-header">
-          <h2>Results</h2>
+          <h2>📊 Analysis Results</h2>
           <span class="result-timestamp" id="result-timestamp"></span>
         </div>
         <div class="score-grid">
           <div class="score-block">
-            <p class="label">Potability score</p>
+            <p class="label">💧 Potability Score</p>
             <p class="score" id="potability-score">--</p>
             <div class="band" id="band-label">Band: --</div>
           </div>
           <div class="score-block">
-            <p class="label">Confidence score</p>
+            <p class="label">🎯 Confidence Level</p>
             <p class="score" id="confidence-score">--</p>
             <div class="confidence-pill" id="confidence-band">--</div>
           </div>
