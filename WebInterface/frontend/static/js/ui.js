@@ -898,6 +898,17 @@ const handleSubmit = async (event) => {
     } else {
       resetDebug();
     }
+
+    // Start Akinator session with visual context
+    if (akinatorController && akinatorController.isActive) {
+      const visualContext = {
+        scores: resultData.scores || payload.scores,
+        scene: resultData.scene || payload.scene,
+        components: resultData.components || payload.components,
+        potability: resultData.potability || payload.potability,
+      };
+      akinatorController.startSession(visualContext, analysisId);
+    }
   } catch (error) {
     console.error(error);
     analysisIdEl.textContent = "Analysis failed";
@@ -925,7 +936,12 @@ const handleReset = () => {
   clearTimeline();
   resetDebug();
   renderUserAnalysis(null);
-  locationStatus.textContent = "Location not set";
+  locationStatus.textContent = "Location features coming soon";
+  
+  // Reset Akinator controller
+  if (akinatorController) {
+    akinatorController.reset();
+  }
 };
 
 const handleLocate = () => {
@@ -1123,6 +1139,498 @@ form?.addEventListener("submit", handleSubmit);
 form?.addEventListener("reset", handleReset);
 locateBtn?.addEventListener("click", handleLocate);
 refreshHistoryBtn?.addEventListener("click", refreshHistory);
+
+// ============================================
+// AKINATOR CONTROLLER CLASS
+// ============================================
+
+class AkinatorController {
+  constructor() {
+    this.sessionId = null;
+    this.currentQuestion = null;
+    this.roundNumber = 0;
+    this.maxRounds = 10;
+    this.isActive = false;
+    this.analysisId = null;
+    this.visualContext = null;
+    this.messageHistory = [];
+    
+    // DOM elements
+    this.chatEl = document.getElementById("akinator-chat");
+    this.bodyEl = document.getElementById("akinator-body");
+    this.headerEl = document.getElementById("akinator-header");
+    this.toggleBtn = document.getElementById("akinator-toggle-btn");
+    this.floatBtn = document.getElementById("akinator-float-btn");
+    this.statusEl = document.getElementById("akinator-status");
+    
+    this.init();
+  }
+  
+  init() {
+    // Header click to expand/collapse
+    this.headerEl?.addEventListener("click", (e) => {
+      if (e.target !== this.toggleBtn) {
+        this.toggleCollapse();
+      }
+    });
+    
+    // Toggle button
+    this.toggleBtn?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.toggleCollapse();
+    });
+    
+    // Float button to show chat
+    this.floatBtn?.addEventListener("click", () => {
+      this.show();
+    });
+    
+    // Show the chat by default (Akinator mode ON by default)
+    this.show();
+  }
+  
+  show() {
+    this.chatEl?.classList.remove("hidden");
+    this.floatBtn?.classList.add("hidden");
+    this.isActive = true;
+  }
+  
+  hide() {
+    this.chatEl?.classList.add("hidden");
+    this.floatBtn?.classList.remove("hidden");
+    this.isActive = false;
+  }
+  
+  toggleCollapse() {
+    this.chatEl?.classList.toggle("collapsed");
+    const icon = this.toggleBtn?.textContent;
+    if (this.toggleBtn) {
+      this.toggleBtn.textContent = icon === "v" ? "^" : "v";
+    }
+  }
+  
+  async startSession(visualContext = null, analysisId = null) {
+    try {
+      this.visualContext = visualContext;
+      this.analysisId = analysisId;
+      this.messageHistory = [];
+      this.roundNumber = 0;
+      
+      // Clear the body
+      this.bodyEl.innerHTML = "";
+      
+      // Add loading status
+      this.addStatus("Starting AI analysis session...");
+      
+      // Call API to start session
+      const response = await fetch("/api/akinator/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initial_context: visualContext,
+          analysis_id: analysisId,
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      this.sessionId = data.session_id;
+      this.roundNumber = data.round_number;
+      
+      // Remove loading status
+      this.clearStatus();
+      
+      if (data.question) {
+        this.currentQuestion = data.question;
+        this.renderQuestion(data.question);
+      } else if (data.inference) {
+        this.renderInference(data.inference);
+      }
+      
+    } catch (error) {
+      console.error("Failed to start Akinator session:", error);
+      this.addStatus("Failed to start AI session. Using fallback mode.");
+      // Start with fallback question
+      this.startFallbackSession();
+    }
+  }
+  
+  startFallbackSession() {
+    this.sessionId = `fallback-${Date.now()}`;
+    this.roundNumber = 1;
+    this.currentQuestion = {
+      id: "q-smell",
+      text: "Does the water have any unusual smell? (chlorine, sulfur/rotten egg, metallic, earthy/musty, or no smell)",
+      type: "choice",
+      options: ["Yes, strong smell", "Yes, slight smell", "No smell", "Not sure"],
+    };
+    this.renderQuestion(this.currentQuestion);
+  }
+  
+  renderQuestion(question) {
+    const questionEl = document.createElement("div");
+    questionEl.className = "akinator-question";
+    questionEl.id = `question-${question.id}`;
+    
+    const roundInfo = document.createElement("div");
+    roundInfo.className = "akinator-round";
+    roundInfo.textContent = `Round ${this.roundNumber} of ${this.maxRounds}`;
+    
+    const textEl = document.createElement("p");
+    textEl.textContent = question.text;
+    
+    const optionsEl = document.createElement("div");
+    optionsEl.className = "akinator-options";
+    
+    if (question.type === "yesno" || question.type === "choice") {
+      const options = question.options || ["Yes", "No", "Not sure"];
+      options.forEach((option) => {
+        const btn = document.createElement("button");
+        btn.textContent = option;
+        btn.addEventListener("click", () => this.submitAnswer(question.id, option));
+        optionsEl.appendChild(btn);
+      });
+    } else if (question.type === "text") {
+      // Text input for open-ended questions
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = "Type your answer...";
+      input.className = "akinator-text-input";
+      input.style.cssText = "width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: white; margin-bottom: 8px;";
+      
+      const submitBtn = document.createElement("button");
+      submitBtn.textContent = "Submit";
+      submitBtn.addEventListener("click", () => {
+        if (input.value.trim()) {
+          this.submitAnswer(question.id, input.value.trim());
+        }
+      });
+      
+      optionsEl.appendChild(input);
+      optionsEl.appendChild(submitBtn);
+    }
+    
+    questionEl.appendChild(roundInfo);
+    questionEl.appendChild(textEl);
+    questionEl.appendChild(optionsEl);
+    
+    this.bodyEl.appendChild(questionEl);
+    this.scrollToBottom();
+  }
+  
+  async submitAnswer(questionId, answer) {
+    try {
+      // Add the answer to the chat
+      this.addAnswer(answer);
+      
+      // Disable the current question buttons
+      const questionEl = document.getElementById(`question-${questionId}`);
+      if (questionEl) {
+        const buttons = questionEl.querySelectorAll("button");
+        buttons.forEach((btn) => {
+          btn.disabled = true;
+          if (btn.textContent === answer) {
+            btn.classList.add("selected");
+          }
+        });
+      }
+      
+      // Add thinking status
+      this.addStatus("Analyzing your answer...");
+      
+      // Submit to API
+      const response = await fetch("/api/akinator/answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: this.sessionId,
+          question_id: questionId,
+          answer: answer,
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      this.roundNumber = data.round_number;
+      this.clearStatus();
+      
+      // Store in history
+      this.messageHistory.push({
+        question: this.currentQuestion,
+        answer: answer,
+      });
+      
+      if (data.inference) {
+        // We have a result!
+        this.renderInference(data.inference);
+      } else if (data.question) {
+        // More questions needed
+        this.currentQuestion = data.question;
+        this.renderQuestion(data.question);
+      } else {
+        // Something went wrong
+        this.addStatus("Unable to continue analysis. Please try again.");
+      }
+      
+    } catch (error) {
+      console.error("Failed to submit answer:", error);
+      this.clearStatus();
+      
+      // Fallback: continue with next question locally
+      this.continueFallback(questionId, answer);
+    }
+  }
+  
+  continueFallback(questionId, answer) {
+    // Simple fallback question flow
+    const fallbackQuestions = [
+      { id: "q-color", text: "What color is the water?", type: "choice", options: ["Clear/transparent", "Slightly yellow/tinted", "Brown/muddy", "Green (algae)", "Other"] },
+      { id: "q-clarity", text: "How clear is the water?", type: "choice", options: ["Crystal clear", "Slightly cloudy", "Very cloudy/turbid", "Opaque"] },
+      { id: "q-particles", text: "Can you see any particles or sediment in the water?", type: "choice", options: ["No particles visible", "Small particles suspended", "Settled sediment at bottom", "Large debris visible"] },
+      { id: "q-source", text: "What is the source of this water?", type: "choice", options: ["Tap/municipal supply", "Well/borehole", "River/stream", "Lake/pond", "Rainwater", "Unknown"] },
+      { id: "q-container", text: "Is the water in its original container or has it been transferred?", type: "choice", options: ["Original sealed bottle", "Transferred to another container", "Open container", "Natural water body"] },
+    ];
+    
+    const currentIndex = this.roundNumber - 1;
+    
+    if (currentIndex < fallbackQuestions.length && this.roundNumber < this.maxRounds) {
+      this.currentQuestion = fallbackQuestions[currentIndex];
+      this.roundNumber++;
+      this.renderQuestion(this.currentQuestion);
+    } else {
+      // Generate a fallback inference based on answers
+      this.generateFallbackInference();
+    }
+  }
+  
+  generateFallbackInference() {
+    // Simple inference based on collected answers
+    let score = 70; // Start with moderate score
+    let confidence = 0.5;
+    let reasoning = "Based on your observations: ";
+    let contaminants = [];
+    
+    // Analyze answers
+    this.messageHistory.forEach(({ question, answer }) => {
+      if (question.id === "q-smell") {
+        if (answer.includes("strong") || answer.includes("slight")) {
+          score -= 15;
+          reasoning += "Unusual smell detected. ";
+          contaminants.push("Potential chemical contamination");
+        }
+      }
+      if (question.id === "q-color") {
+        if (answer.includes("Brown") || answer.includes("muddy")) {
+          score -= 20;
+          reasoning += "Discoloration suggests contamination. ";
+          contaminants.push("Sediment/particulate matter");
+        } else if (answer.includes("Green")) {
+          score -= 25;
+          reasoning += "Green tint suggests algae growth. ";
+          contaminants.push("Algal contamination");
+        }
+      }
+      if (question.id === "q-clarity") {
+        if (answer.includes("cloudy") || answer.includes("turbid") || answer.includes("Opaque")) {
+          score -= 20;
+          reasoning += "Low clarity indicates impurities. ";
+        }
+      }
+    });
+    
+    // Clamp score
+    score = Math.max(0, Math.min(100, score));
+    confidence = Math.min(0.85, confidence + (this.messageHistory.length * 0.05));
+    
+    const waterQuality = score >= 70 ? "Likely Safe" : score >= 40 ? "Questionable" : "Potentially Unsafe";
+    
+    this.renderInference({
+      water_quality: waterQuality,
+      confidence: confidence,
+      reasoning: reasoning,
+      recommendations: this.generateRecommendations(score),
+      contaminants: contaminants,
+    });
+  }
+  
+  generateRecommendations(score) {
+    if (score >= 80) {
+      return ["Water appears safe based on visual inspection", "Regular testing recommended for confirmation"];
+    } else if (score >= 60) {
+      return ["Consider boiling before drinking", "Test for specific contaminants if concerned", "Use filtration if available"];
+    } else if (score >= 40) {
+      return ["Do not drink without proper treatment", "Boil and filter before any use", "Consider laboratory testing"];
+    } else {
+      return ["Do not consume this water", "Seek alternative water source", "Contact local water authorities if from municipal supply"];
+    }
+  }
+  
+  renderInference(inference) {
+    const resultEl = document.createElement("div");
+    resultEl.className = "akinator-result";
+    
+    const titleEl = document.createElement("h4");
+    titleEl.textContent = "Analysis Complete!";
+    
+    const qualityEl = document.createElement("p");
+    qualityEl.innerHTML = `<strong>Water Quality:</strong> ${inference.water_quality}`;
+    
+    const reasoningEl = document.createElement("p");
+    reasoningEl.textContent = inference.reasoning || "Based on visual and contextual analysis.";
+    
+    const confidenceBar = document.createElement("div");
+    confidenceBar.className = "confidence-bar";
+    
+    const confidenceFill = document.createElement("div");
+    confidenceFill.className = "confidence-fill";
+    confidenceFill.style.width = `${(inference.confidence || 0.5) * 100}%`;
+    
+    confidenceBar.appendChild(confidenceFill);
+    
+    const confidenceLabel = document.createElement("p");
+    confidenceLabel.style.fontSize = "0.8rem";
+    confidenceLabel.style.color = "rgba(255,255,255,0.6)";
+    confidenceLabel.textContent = `Confidence: ${Math.round((inference.confidence || 0.5) * 100)}%`;
+    
+    resultEl.appendChild(titleEl);
+    resultEl.appendChild(qualityEl);
+    resultEl.appendChild(reasoningEl);
+    resultEl.appendChild(confidenceLabel);
+    resultEl.appendChild(confidenceBar);
+    
+    // Add recommendations if available
+    if (inference.recommendations && inference.recommendations.length > 0) {
+      const recsEl = document.createElement("div");
+      recsEl.style.marginTop = "12px";
+      
+      const recsTitle = document.createElement("p");
+      recsTitle.style.fontSize = "0.85rem";
+      recsTitle.style.color = "rgba(255,255,255,0.8)";
+      recsTitle.innerHTML = "<strong>Recommendations:</strong>";
+      recsEl.appendChild(recsTitle);
+      
+      const recsList = document.createElement("ul");
+      recsList.style.margin = "8px 0";
+      recsList.style.paddingLeft = "20px";
+      recsList.style.fontSize = "0.8rem";
+      inference.recommendations.forEach((rec) => {
+        const li = document.createElement("li");
+        li.textContent = rec;
+        li.style.color = "rgba(255,255,255,0.7)";
+        recsList.appendChild(li);
+      });
+      recsEl.appendChild(recsList);
+      resultEl.appendChild(recsEl);
+    }
+    
+    // Add done button
+    const doneBtn = document.createElement("button");
+    doneBtn.textContent = "Done";
+    doneBtn.style.cssText = "margin-top: 16px; width: 100%; padding: 10px; border-radius: 8px; border: none; background: linear-gradient(135deg, var(--primary, #00d4ff), var(--accent-green, #00ff88)); color: #0a0a0f; font-weight: 600; cursor: pointer;";
+    doneBtn.addEventListener("click", () => {
+      this.hide();
+      // Update the main results display with the inference
+      this.updateMainResults(inference);
+    });
+    
+    resultEl.appendChild(doneBtn);
+    
+    this.bodyEl.appendChild(resultEl);
+    this.scrollToBottom();
+    
+    // Also update main results
+    this.updateMainResults(inference);
+  }
+  
+  updateMainResults(inference) {
+    // Map water quality to score
+    let score = 50;
+    if (inference.water_quality === "Likely Safe" || inference.water_quality === "Clean") {
+      score = 80;
+    } else if (inference.water_quality === "Questionable" || inference.water_quality === "Moderate") {
+      score = 50;
+    } else if (inference.water_quality === "Potentially Unsafe" || inference.water_quality === "Dirty") {
+      score = 25;
+    }
+    
+    // Update potability score if available
+    if (potabilityScoreEl) {
+      potabilityScoreEl.textContent = score;
+    }
+    if (confidenceScoreEl) {
+      confidenceScoreEl.textContent = `${Math.round(inference.confidence * 100)}%`;
+    }
+    if (confidenceBandEl) {
+      const band = inference.confidence >= 0.8 ? "High" : inference.confidence >= 0.5 ? "Moderate" : "Low";
+      confidenceBandEl.textContent = band;
+    }
+    
+    // Show results card
+    if (resultsCard) {
+      resultsCard.classList.remove("hidden");
+    }
+  }
+  
+  addAnswer(answer) {
+    const answerEl = document.createElement("div");
+    answerEl.className = "akinator-answer";
+    
+    const textEl = document.createElement("p");
+    textEl.textContent = answer;
+    
+    answerEl.appendChild(textEl);
+    this.bodyEl.appendChild(answerEl);
+    this.scrollToBottom();
+  }
+  
+  addStatus(message) {
+    const statusEl = document.createElement("div");
+    statusEl.className = "akinator-status";
+    statusEl.textContent = message;
+    this.bodyEl.appendChild(statusEl);
+    this.scrollToBottom();
+  }
+  
+  clearStatus() {
+    const statusEl = this.bodyEl.querySelector(".akinator-status:last-child");
+    if (statusEl) {
+      statusEl.remove();
+    }
+  }
+  
+  scrollToBottom() {
+    if (this.bodyEl) {
+      this.bodyEl.scrollTop = this.bodyEl.scrollHeight;
+    }
+  }
+  
+  reset() {
+    this.sessionId = null;
+    this.currentQuestion = null;
+    this.roundNumber = 0;
+    this.visualContext = null;
+    this.analysisId = null;
+    this.messageHistory = [];
+    
+    if (this.bodyEl) {
+      this.bodyEl.innerHTML = "";
+      this.addStatus("Ready to analyze. Upload media to begin.");
+    }
+  }
+}
+
+// Initialize Akinator controller
+const akinatorController = new AkinatorController();
+
+// ============================================
+// END AKINATOR CONTROLLER
+// ============================================
 
 // Initialize default state
 clearTimeline();

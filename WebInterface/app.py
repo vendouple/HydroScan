@@ -68,12 +68,13 @@ def create_app() -> FastAPI:
         return templates.TemplateResponse("model-lab.html", {"request": request})
 
     try:
-        from WebInterface.API import analyze, models, results, model_test  # noqa: F401
+        from WebInterface.API import analyze, models, results, model_test, akinator  # noqa: F401
 
         app.include_router(analyze.router, prefix="/api")
         app.include_router(results.router, prefix="/api")
         app.include_router(models.router, prefix="/api")
         app.include_router(model_test.router, prefix="/api")
+        app.include_router(akinator.router)  # Akinator has its own prefix
     except Exception as e:
         print(f"[HydroScan] Router include skipped: {e}")
 

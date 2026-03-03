@@ -3,13 +3,410 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>HydroScan</title>
+    <title>HydroScan - AI Water Quality Analysis</title>
     <link rel="stylesheet" href="/static/css/main.css" />
+    <style>
+      /* Premium page-specific styles */
+      body {
+        background: var(--dark, #0a0a0f);
+        min-height: 100vh;
+      }
+      
+      /* Hero premium styling */
+      .hero.premium {
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, rgba(0, 255, 136, 0.05) 100%);
+        border-bottom: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
+      }
+      
+      .hero.premium h1 {
+        background: linear-gradient(135deg, var(--primary, #00d4ff) 0%, var(--accent-green, #00ff88) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        text-shadow: none;
+      }
+      
+      .hero.premium .subtitle {
+        color: rgba(255, 255, 255, 0.7);
+      }
+      
+      /* Card premium styling */
+      .card.premium {
+        background: var(--glass, rgba(255, 255, 255, 0.05));
+        border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      }
+      
+      .card.premium .card-header h2 {
+        color: var(--primary, #00d4ff);
+      }
+      
+      /* Location disabled styling */
+      .location-disabled {
+        opacity: 0.5;
+        pointer-events: none;
+        filter: grayscale(0.5);
+      }
+      
+      .location-disabled input,
+      .location-disabled button {
+        background: rgba(128, 128, 128, 0.2) !important;
+        cursor: not-allowed !important;
+      }
+      
+      .location-disabled label::after {
+        content: " (Coming Soon)";
+        font-size: 0.75em;
+        color: rgba(255, 255, 255, 0.5);
+      }
+      
+      /* Akinator Chat Widget */
+      .akinator-chat {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        width: 380px;
+        max-height: 500px;
+        background: var(--glass, rgba(255, 255, 255, 0.05));
+        border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
+        border-radius: 16px;
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        transition: transform 0.3s ease, opacity 0.3s ease;
+      }
+      
+      .akinator-chat.collapsed {
+        transform: translateY(calc(100% - 56px));
+      }
+      
+      .akinator-chat.hidden {
+        transform: translateY(100%);
+        opacity: 0;
+        pointer-events: none;
+      }
+      
+      .akinator-header {
+        padding: 16px;
+        background: linear-gradient(135deg, var(--primary, #00d4ff) 0%, var(--accent-green, #00ff88) 100%);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+      }
+      
+      .akinator-header h3 {
+        margin: 0;
+        font-size: 1rem;
+        color: var(--dark, #0a0a0f);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      
+      .akinator-header .toggle-btn {
+        background: rgba(0, 0, 0, 0.2);
+        border: none;
+        color: white;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.2s;
+      }
+      
+      .akinator-header .toggle-btn:hover {
+        background: rgba(0, 0, 0, 0.3);
+      }
+      
+      .akinator-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-height: 400px;
+      }
+      
+      .akinator-question {
+        background: rgba(0, 212, 255, 0.1);
+        border: 1px solid rgba(0, 212, 255, 0.2);
+        border-radius: 12px;
+        padding: 12px;
+      }
+      
+      .akinator-question p {
+        margin: 0 0 12px 0;
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 0.95rem;
+      }
+      
+      .akinator-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      
+      .akinator-options button {
+        flex: 1;
+        min-width: 80px;
+        padding: 8px 16px;
+        border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.2));
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.05);
+        color: white;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 0.85rem;
+      }
+      
+      .akinator-options button:hover {
+        background: rgba(0, 212, 255, 0.2);
+        border-color: var(--primary, #00d4ff);
+      }
+      
+      .akinator-options button.selected {
+        background: var(--primary, #00d4ff);
+        color: var(--dark, #0a0a0f);
+        border-color: var(--primary, #00d4ff);
+      }
+      
+      .akinator-answer {
+        background: rgba(0, 255, 136, 0.1);
+        border: 1px solid rgba(0, 255, 136, 0.2);
+        border-radius: 12px;
+        padding: 10px 14px;
+        margin-left: auto;
+        max-width: 80%;
+      }
+      
+      .akinator-answer p {
+        margin: 0;
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 0.9rem;
+      }
+      
+      .akinator-result {
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.15) 0%, rgba(0, 255, 136, 0.15) 100%);
+        border: 1px solid rgba(0, 255, 136, 0.3);
+        border-radius: 12px;
+        padding: 16px;
+      }
+      
+      .akinator-result h4 {
+        margin: 0 0 8px 0;
+        color: var(--accent-green, #00ff88);
+        font-size: 1rem;
+      }
+      
+      .akinator-result p {
+        margin: 0 0 8px 0;
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 0.9rem;
+      }
+      
+      .akinator-result .confidence-bar {
+        height: 8px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+        overflow: hidden;
+        margin-top: 12px;
+      }
+      
+      .akinator-result .confidence-fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--primary, #00d4ff), var(--accent-green, #00ff88));
+        border-radius: 4px;
+        transition: width 0.5s ease;
+      }
+      
+      .akinator-status {
+        text-align: center;
+        padding: 12px;
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 0.85rem;
+      }
+      
+      .akinator-round {
+        font-size: 0.75rem;
+        color: rgba(255, 255, 255, 0.5);
+        text-align: center;
+        margin-top: 8px;
+      }
+      
+      .akinator-close {
+        position: absolute;
+        top: 8px;
+        right: 48px;
+        background: rgba(0, 0, 0, 0.2);
+        border: none;
+        color: white;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        cursor: pointer;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      
+      .akinator-close:hover {
+        background: rgba(0, 0, 0, 0.4);
+      }
+      
+      /* Akinator toggle button (when chat is hidden) */
+      .akinator-toggle {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--primary, #00d4ff) 0%, var(--accent-green, #00ff88) 100%);
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        box-shadow: 0 4px 20px rgba(0, 212, 255, 0.4);
+        z-index: 999;
+        transition: transform 0.2s, box-shadow 0.2s;
+      }
+      
+      .akinator-toggle:hover {
+        transform: scale(1.1);
+        box-shadow: 0 6px 24px rgba(0, 212, 255, 0.5);
+      }
+      
+      .akinator-toggle.hidden {
+        display: none;
+      }
+      
+      /* History card premium redesign */
+      .history-card.premium .history-list {
+        display: grid;
+        gap: 12px;
+      }
+      
+      .history-card.premium .history-item {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        padding: 14px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      
+      .history-card.premium .history-item:hover {
+        background: rgba(0, 212, 255, 0.08);
+        border-color: rgba(0, 212, 255, 0.2);
+      }
+      
+      .history-card.premium .history-item-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      
+      .history-card.premium .history-item-time {
+        font-size: 0.8rem;
+        color: rgba(255, 255, 255, 0.5);
+      }
+      
+      .history-card.premium .history-item-score {
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      
+      .history-card.premium .history-item-score.excellent { color: #00ff88; }
+      .history-card.premium .history-item-score.good { color: #88ff00; }
+      .history-card.premium .history-item-score.moderate { color: #ffcc00; }
+      .history-card.premium .history-item-score.poor { color: #ff8800; }
+      .history-card.premium .history-item-score.bad { color: #ff4444; }
+      
+      .history-card.premium .history-item-preview {
+        font-size: 0.85rem;
+        color: rgba(255, 255, 255, 0.6);
+        display: flex;
+        gap: 16px;
+      }
+      
+      .history-card.premium .history-item-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      
+      .history-card.premium .history-item-actions button {
+        padding: 6px 12px;
+        font-size: 0.75rem;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        background: rgba(255, 255, 255, 0.05);
+        color: rgba(255, 255, 255, 0.8);
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      
+      .history-card.premium .history-item-actions button:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      
+      .history-card.premium .history-item-actions button.delete:hover {
+        background: rgba(255, 68, 68, 0.2);
+        border-color: rgba(255, 68, 68, 0.4);
+        color: #ff6666;
+      }
+      
+      /* Akinator mode indicator */
+      .akinator-mode-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.2) 0%, rgba(0, 255, 136, 0.2) 100%);
+        border: 1px solid rgba(0, 255, 136, 0.3);
+        border-radius: 20px;
+        font-size: 0.75rem;
+        color: var(--accent-green, #00ff88);
+        margin-left: 8px;
+      }
+      
+      .akinator-mode-badge::before {
+        content: "AI";
+        font-weight: 600;
+      }
+    </style>
   </head>
   <body>
-    <header class="hero">
+    <!-- Particle Background -->
+    <div class="particles-background" aria-hidden="true">
+      <div class="particle particle-1"></div>
+      <div class="particle particle-2"></div>
+      <div class="particle particle-3"></div>
+      <div class="particle particle-4"></div>
+      <div class="particle particle-5"></div>
+      <div class="particle particle-6"></div>
+      <div class="particle particle-7"></div>
+      <div class="particle particle-8"></div>
+    </div>
+    
+    <header class="hero premium">
       <a href="/" style="text-decoration: none; color: inherit;">
-        <h1>💧 HydroScan</h1>
+        <h1>HydroScan</h1>
       </a>
       <p class="subtitle">
         AI-powered water quality analysis using computer vision. 
@@ -17,18 +414,18 @@
       </p>
       <div style="margin-top: 16px">
         <a href="/model-lab" class="btn ghost" style="text-decoration: none">
-          🔬 Model Lab
+          Model Lab
         </a>
         <a href="/" class="btn ghost" style="text-decoration: none; margin-left: 8px;">
-          🏠 Home
+          Home
         </a>
       </div>
     </header>
 
     <main id="layout">
-      <section class="card input-card">
+      <section class="card input-card premium">
         <div class="card-header">
-          <h2>📤 Upload Media</h2>
+          <h2>Upload Media <span class="akinator-mode-badge">Akinator Mode</span></h2>
           <p class="card-subtitle">
             Capture water samples with your camera. Upload up to 25 images or 5 short videos.
             Add observations like smell, color, and temperature for better analysis.
@@ -36,7 +433,7 @@
         </div>
         <form id="analyze-form" autocomplete="off">
           <label class="field">
-            <span class="label">📷 Photos & Videos</span>
+            <span class="label">Photos & Videos</span>
             <input
               type="file"
               id="files"
@@ -47,7 +444,7 @@
           </label>
 
           <label class="field">
-            <span class="label">📝 Your Observations (Optional)</span>
+            <span class="label">Your Observations (Optional)</span>
             <textarea
               id="description"
               name="description"
@@ -55,23 +452,23 @@
               placeholder="Describe what you notice: Does it smell? What color is it? Is it cloudy or clear? Any visible particles?"></textarea>
           </label>
 
-          <div class="grid two">
+          <div class="grid two location-disabled">
             <label class="field">
-              <span class="label">📍 Latitude</span>
-              <input type="number" id="lat" name="lat" step="any" placeholder="e.g. -6.2088" />
+              <span class="label">Latitude</span>
+              <input type="number" id="lat" name="lat" step="any" placeholder="e.g. -6.2088" disabled />
             </label>
             <label class="field">
-              <span class="label">📍 Longitude</span>
-              <input type="number" id="lon" name="lon" step="any" placeholder="e.g. 106.8456" />
+              <span class="label">Longitude</span>
+              <input type="number" id="lon" name="lon" step="any" placeholder="e.g. 106.8456" disabled />
             </label>
           </div>
 
-          <div class="location-row">
-            <button type="button" class="ghost" id="locate-btn">
-              📌 Use My Current Location
+          <div class="location-row location-disabled">
+            <button type="button" class="ghost" id="locate-btn" disabled>
+              Use My Current Location
             </button>
             <span class="location-status" id="location-status"
-              >Location not set</span
+              >Location features coming soon</span
             >
           </div>
 
@@ -91,20 +488,20 @@
           </label>
 
           <div class="actions">
-            <button type="submit" id="analyze-btn">🔍 Analyze Water</button>
-            <button type="reset" id="reset-btn">🗑️ Clear</button>
+            <button type="submit" id="analyze-btn">Analyze Water</button>
+            <button type="reset" id="reset-btn">Clear</button>
           </div>
         </form>
 
         <div class="disclaimer">
-          ⚠️ HydroScan is for informational purposes only. Always consult local authorities 
+          HydroScan is for informational purposes only. Always consult local authorities 
           or conduct laboratory testing for official water safety assessments.
         </div>
       </section>
 
-      <section class="card timeline-card" id="timeline-card">
+      <section class="card timeline-card premium" id="timeline-card">
         <div class="card-header">
-          <h2>⏱️ Analysis Progress</h2>
+          <h2>Analysis Progress</h2>
           <span class="analysis-id" id="analysis-id">No analysis yet</span>
         </div>
         <ul class="timeline" id="timeline">
@@ -118,11 +515,11 @@
         </ul>
       </section>
 
-      <section class="card history-card" id="history-card">
+      <section class="card history-card premium" id="history-card">
         <div class="card-header">
-          <h2>📋 Recent Analyses</h2>
+          <h2>Recent Analyses</h2>
           <button type="button" class="ghost" id="refresh-history">
-            🔄 Refresh
+            Refresh
           </button>
         </div>
         <p class="history-empty" id="history-empty">
@@ -131,19 +528,19 @@
         <ul class="history-list" id="history-list"></ul>
       </section>
 
-      <section class="card results-card hidden" id="results-card">
+      <section class="card results-card hidden premium" id="results-card">
         <div class="card-header">
-          <h2>📊 Analysis Results</h2>
+          <h2>Analysis Results</h2>
           <span class="result-timestamp" id="result-timestamp"></span>
         </div>
         <div class="score-grid">
           <div class="score-block">
-            <p class="label">💧 Potability Score</p>
+            <p class="label">Potability Score</p>
             <p class="score" id="potability-score">--</p>
             <div class="band" id="band-label">Band: --</div>
           </div>
           <div class="score-block">
-            <p class="label">🎯 Confidence Level</p>
+            <p class="label">Confidence Level</p>
             <p class="score" id="confidence-score">--</p>
             <div class="confidence-pill" id="confidence-band">--</div>
           </div>
@@ -169,7 +566,7 @@
         </div>
       </section>
 
-      <section class="card debug-card hidden" id="debug-card">
+      <section class="card debug-card hidden premium" id="debug-card">
         <div class="card-header">
           <h2>Debug console</h2>
           <div class="debug-actions">
@@ -197,6 +594,24 @@
         </div>
       </section>
     </main>
+
+    <!-- Akinator Chat Widget -->
+    <div class="akinator-chat hidden" id="akinator-chat">
+      <div class="akinator-header" id="akinator-header">
+        <h3>AI Water Analyst</h3>
+        <button class="toggle-btn" id="akinator-toggle-btn">v</button>
+      </div>
+      <div class="akinator-body" id="akinator-body">
+        <div class="akinator-status" id="akinator-status">
+          Start an analysis to begin AI questioning
+        </div>
+      </div>
+    </div>
+    
+    <!-- Akinator Toggle Button (shown when chat is hidden) -->
+    <button class="akinator-toggle" id="akinator-float-btn" title="Open AI Analyst">
+      <span>AI</span>
+    </button>
 
     <script src="/static/js/ui.js" type="module"></script>
   </body>
