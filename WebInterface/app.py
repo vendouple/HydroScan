@@ -56,6 +56,10 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/", response_class=HTMLResponse)
+    def home(request: Request):
+        return templates.TemplateResponse("home.html", {"request": request})
+
+    @app.get("/app", response_class=HTMLResponse)
     def index(request: Request):
         return templates.TemplateResponse("index.html", {"request": request})
 
