@@ -251,6 +251,98 @@
             transform: translateX(6px);
         }
 
+        /* AI Options Grid */
+        .ai-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+            margin-bottom: 40px;
+            animation: fadeIn 1s ease-out 0.5s backwards;
+        }
+
+        .ai-card {
+            position: relative;
+            padding: 30px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+            backdrop-filter: blur(10px);
+            text-decoration: none;
+            color: inherit;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            overflow: hidden;
+        }
+
+        .ai-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--card-accent), var(--card-accent-2));
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .ai-card:hover::before {
+            opacity: 1;
+        }
+
+        .ai-card:hover {
+            transform: translateY(-8px);
+            border-color: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .ai-card.hydroscan {
+            --card-accent: #00d4ff;
+            --card-accent-2: #00ff88;
+        }
+
+        .ai-card.plantnet {
+            --card-accent: #22c55e;
+            --card-accent-2: #86efac;
+        }
+
+        .ai-card .card-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .ai-card h3 {
+            font-family: 'Poppins', sans-serif;
+            font-size: 24px;
+            font-weight: 700;
+            margin: 0 0 12px;
+            background: linear-gradient(135deg, var(--card-accent), var(--card-accent-2));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .ai-card p {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.6);
+            line-height: 1.6;
+            margin: 0;
+        }
+
+        .ai-card .card-arrow {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            font-size: 20px;
+            opacity: 0;
+            transform: translateX(-10px);
+            transition: all 0.3s ease;
+        }
+
+        .ai-card:hover .card-arrow {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
         /* Secondary links */
         .secondary-links {
             margin-top: 30px;
@@ -354,22 +446,34 @@
 
     <!-- Hero Content -->
     <div class="hero">
-        <div class="hero-icon">💧</div>
-        <h1 class="hero-title">HydroScan</h1>
+        <div class="hero-icon">🤖</div>
+        <h1 class="hero-title">AI Vision Lab</h1>
         <p class="hero-subtitle">
-            Water safety analysis powered by computer vision and AI. 
-            Upload images or videos to detect potential water quality issues instantly.
+            Powerful AI-powered analysis tools for environmental and botanical research.
+            Choose your analysis mode below to get started.
         </p>
-        <a href="/app" class="cta-button">
-            Start Scanning
-            <span class="arrow">→</span>
-        </a>
+        
+        <div class="ai-options">
+            <a href="/app" class="ai-card hydroscan">
+                <div class="card-icon">💧</div>
+                <h3>HydroScan</h3>
+                <p>Water safety analysis powered by computer vision. Upload images or videos to detect potential water quality issues instantly.</p>
+                <span class="card-arrow">→</span>
+            </a>
+            <a href="/plantnet" class="ai-card plantnet">
+                <div class="card-icon">🌿</div>
+                <h3>PlantScan</h3>
+                <p>Identify any plant species using AI. Take a photo of a leaf, flower, or bark to discover its scientific name and family.</p>
+                <span class="card-arrow">→</span>
+            </a>
+        </div>
+        
         <div class="secondary-links">
             <a href="/model-lab" class="secondary-link">🔬 Model Lab</a>
         </div>
     </div>
 
-    <div class="version-badge">HydroScan v1.0</div>
+    <div class="version-badge">AI Vision Lab v1.0</div>
     <div class="credits">
         <strong>Made by</strong> Nicholas James, James Lili, Eithanniel, Russell, Almeria & Ralph
     </div>

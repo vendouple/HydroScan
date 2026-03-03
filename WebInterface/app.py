@@ -67,13 +67,18 @@ def create_app() -> FastAPI:
     def model_lab(request: Request):
         return templates.TemplateResponse("model-lab.html", {"request": request})
 
+    @app.get("/plantnet", response_class=HTMLResponse)
+    def plantnet(request: Request):
+        return templates.TemplateResponse("plantnet.html", {"request": request})
+
     try:
-        from WebInterface.API import analyze, models, results, model_test  # noqa: F401
+        from WebInterface.API import analyze, models, results, model_test, plantnet  # noqa: F401
 
         app.include_router(analyze.router, prefix="/api")
         app.include_router(results.router, prefix="/api")
         app.include_router(models.router, prefix="/api")
         app.include_router(model_test.router, prefix="/api")
+        app.include_router(plantnet.router, prefix="/api")
     except Exception as e:
         print(f"[HydroScan] Router include skipped: {e}")
 

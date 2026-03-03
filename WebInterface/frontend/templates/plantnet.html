@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PlantScan — Plant Identification</title>
+    <link rel="stylesheet" href="/static/css/main.css" />
+    <style>
+      /* PlantNet specific styles */
+      .plant-results {
+        display: grid;
+        gap: 16px;
+        margin-top: 20px;
+      }
+
+      .plant-card {
+        background: rgba(34, 197, 94, 0.1);
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        border-radius: 16px;
+        padding: 20px;
+        transition: all 0.3s ease;
+      }
+
+      .plant-card:hover {
+        border-color: rgba(34, 197, 94, 0.6);
+        transform: translateY(-2px);
+      }
+
+      .plant-card.best-match {
+        background: rgba(34, 197, 94, 0.2);
+        border-color: rgba(34, 197, 94, 0.6);
+        box-shadow: 0 4px 20px rgba(34, 197, 94, 0.2);
+      }
+
+      .plant-card .best-badge {
+        display: inline-block;
+        background: linear-gradient(135deg, #22c55e, #16a34a);
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 12px;
+      }
+
+      .plant-card h3 {
+        margin: 0 0 8px;
+        font-size: 1.2rem;
+        color: #22c55e;
+        font-style: italic;
+      }
+
+      .plant-card .common-names {
+        color: var(--text-muted);
+        margin: 0 0 12px;
+        font-size: 0.95rem;
+      }
+
+      .plant-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .plant-meta .tag {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+      }
+
+      .plant-meta .tag strong {
+        color: var(--text);
+      }
+
+      .confidence-bar {
+        height: 8px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+        overflow: hidden;
+        margin-top: 12px;
+      }
+
+      .confidence-bar .fill {
+        height: 100%;
+        background: linear-gradient(90deg, #22c55e, #16a34a);
+        border-radius: 4px;
+        transition: width 0.5s ease;
+      }
+
+      .confidence-label {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.85rem;
+        margin-top: 4px;
+        color: var(--text-muted);
+      }
+
+      .reference-images {
+        display: flex;
+        gap: 8px;
+        margin-top: 16px;
+        flex-wrap: wrap;
+      }
+
+      .reference-images img {
+        width: 80px;
+        height: 80px;
+        object-fit: cover;
+        border-radius: 8px;
+        border: 2px solid rgba(255, 255, 255, 0.1);
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+
+      .reference-images img:hover {
+        border-color: #22c55e;
+        transform: scale(1.05);
+      }
+
+      .organ-select {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .organ-btn {
+        padding: 8px 16px;
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        border-radius: 20px;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 0.9rem;
+      }
+
+      .organ-btn:hover {
+        border-color: rgba(34, 197, 94, 0.6);
+        background: rgba(34, 197, 94, 0.1);
+      }
+
+      .organ-btn.active {
+        background: linear-gradient(135deg, #22c55e, #16a34a);
+        border-color: transparent;
+        color: white;
+      }
+
+      .image-preview {
+        max-width: 100%;
+        max-height: 300px;
+        border-radius: 12px;
+        margin: 16px 0;
+        display: none;
+      }
+
+      .image-preview.visible {
+        display: block;
+      }
+
+      .loading-spinner {
+        display: none;
+        text-align: center;
+        padding: 40px;
+      }
+
+      .loading-spinner.visible {
+        display: block;
+      }
+
+      .loading-spinner .spinner {
+        width: 48px;
+        height: 48px;
+        border: 4px solid rgba(34, 197, 94, 0.2);
+        border-top-color: #22c55e;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 16px;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      .hero h1 {
+        color: #22c55e;
+      }
+
+      .no-results {
+        text-align: center;
+        padding: 40px;
+        color: var(--text-muted);
+      }
+
+      .error-message {
+        background: rgba(248, 113, 113, 0.1);
+        border: 1px solid rgba(248, 113, 113, 0.3);
+        border-radius: 12px;
+        padding: 16px;
+        color: #f87171;
+        margin-top: 16px;
+      }
+
+      .api-info {
+        background: rgba(34, 197, 94, 0.1);
+        border: 1px solid rgba(34, 197, 94, 0.2);
+        border-radius: 12px;
+        padding: 12px 16px;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        margin-top: 16px;
+      }
+
+      .api-info strong {
+        color: #22c55e;
+      }
+
+      /* Video Background */
+      .video-background {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -2;
+        overflow: hidden;
+      }
+
+      .video-background video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transform: scale(1.1);
+        transform-origin: center center;
+      }
+
+      .video-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(
+          135deg,
+          rgba(0, 20, 10, 0.7) 0%,
+          rgba(0, 30, 15, 0.6) 50%,
+          rgba(0, 20, 10, 0.75) 100%
+        );
+        z-index: -1;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Video Background -->
+    <div class="video-background">
+      <video autoplay muted loop playsinline>
+        <source src="/static/videos/PlantScanBG.mp4" type="video/mp4">
+      </video>
+    </div>
+    <div class="video-overlay"></div>
+
+    <header class="hero">
+      <a href="/" style="text-decoration: none; color: inherit;">
+        <h1>🌿 PlantScan</h1>
+      </a>
+      <p class="subtitle">
+        AI-powered plant identification using the PlantNet API. 
+        Upload a photo of any plant to discover its species, family, and common names.
+      </p>
+      <div style="margin-top: 16px">
+        <a href="/" class="btn ghost" style="text-decoration: none">
+          🏠 Home
+        </a>
+        <a href="/app" class="btn ghost" style="text-decoration: none; margin-left: 8px;">
+          💧 HydroScan
+        </a>
+      </div>
+    </header>
+
+    <main id="layout">
+      <section class="card input-card">
+        <div class="card-header">
+          <h2>📸 Upload Plant Photo</h2>
+          <p class="card-subtitle">
+            Take a clear photo of a plant's leaf, flower, fruit, or bark for best results.
+          </p>
+        </div>
+        <form id="identify-form" autocomplete="off">
+          <label class="field">
+            <span class="label">🌱 Plant Photo</span>
+            <input
+              type="file"
+              id="plant-image"
+              name="file"
+              accept="image/*"
+              required />
+          </label>
+
+          <img id="image-preview" class="image-preview" alt="Preview" />
+
+          <label class="field">
+            <span class="label">🔍 What part of the plant is visible?</span>
+            <div class="organ-select" id="organ-select">
+              <button type="button" class="organ-btn active" data-organ="auto">🤖 Auto-detect</button>
+              <button type="button" class="organ-btn" data-organ="leaf">🍃 Leaf</button>
+              <button type="button" class="organ-btn" data-organ="flower">🌸 Flower</button>
+              <button type="button" class="organ-btn" data-organ="fruit">🍎 Fruit</button>
+              <button type="button" class="organ-btn" data-organ="bark">🪵 Bark</button>
+            </div>
+          </label>
+
+          <input type="hidden" id="organs" name="organs" value="auto" />
+
+          <div class="actions">
+            <button type="submit" id="identify-btn">🔬 Identify Plant</button>
+            <button type="reset" id="reset-btn">🗑️ Clear</button>
+          </div>
+        </form>
+
+        <div class="disclaimer">
+          ⚠️ PlantScan is for informational purposes only. Some plants may be toxic or look similar to edible species. 
+          Always verify with an expert before consuming any wild plants.
+        </div>
+      </section>
+
+      <section class="card results-card" id="results-card" style="display: none;">
+        <div class="card-header">
+          <h2>🌿 Identification Results</h2>
+        </div>
+
+        <div class="loading-spinner" id="loading">
+          <div class="spinner"></div>
+          <p>Analyzing your plant...</p>
+        </div>
+
+        <div class="error-message" id="error" style="display: none;"></div>
+
+        <div class="plant-results" id="plant-results"></div>
+
+        <div class="api-info" id="api-info" style="display: none;">
+          <strong>API Status:</strong> <span id="remaining-requests">--</span> requests remaining today
+        </div>
+      </section>
+    </main>
+
+    <script>
+      // DOM Elements
+      const form = document.getElementById('identify-form');
+      const fileInput = document.getElementById('plant-image');
+      const preview = document.getElementById('image-preview');
+      const organSelect = document.getElementById('organ-select');
+      const organsInput = document.getElementById('organs');
+      const resultsCard = document.getElementById('results-card');
+      const resultsContainer = document.getElementById('plant-results');
+      const loading = document.getElementById('loading');
+      const errorDiv = document.getElementById('error');
+      const apiInfo = document.getElementById('api-info');
+      const identifyBtn = document.getElementById('identify-btn');
+
+      // Selected organs (default: auto)
+      let selectedOrgans = ['auto'];
+
+      // File preview
+      fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            preview.src = ev.target.result;
+            preview.classList.add('visible');
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+
+      // Organ selection
+      organSelect.addEventListener('click', (e) => {
+        if (e.target.classList.contains('organ-btn')) {
+          const organ = e.target.dataset.organ;
+          
+          if (organ === 'auto') {
+            // Auto is exclusive
+            selectedOrgans = ['auto'];
+            document.querySelectorAll('.organ-btn').forEach(btn => btn.classList.remove('active'));
+            e.target.classList.add('active');
+          } else {
+            // Remove auto if selecting specific organ
+            const autoBtn = document.querySelector('[data-organ="auto"]');
+            autoBtn.classList.remove('active');
+            selectedOrgans = selectedOrgans.filter(o => o !== 'auto');
+            
+            // Toggle this organ
+            if (selectedOrgans.includes(organ)) {
+              selectedOrgans = selectedOrgans.filter(o => o !== organ);
+              e.target.classList.remove('active');
+              
+              // If nothing selected, go back to auto
+              if (selectedOrgans.length === 0) {
+                selectedOrgans = ['auto'];
+                autoBtn.classList.add('active');
+              }
+            } else {
+              selectedOrgans.push(organ);
+              e.target.classList.add('active');
+            }
+          }
+          
+          organsInput.value = selectedOrgans.join(',');
+        }
+      });
+
+      // Form reset
+      form.addEventListener('reset', () => {
+        preview.classList.remove('visible');
+        preview.src = '';
+        resultsCard.style.display = 'none';
+        resultsContainer.innerHTML = '';
+        errorDiv.style.display = 'none';
+        apiInfo.style.display = 'none';
+        selectedOrgans = ['auto'];
+        document.querySelectorAll('.organ-btn').forEach(btn => {
+          btn.classList.remove('active');
+          if (btn.dataset.organ === 'auto') btn.classList.add('active');
+        });
+        organsInput.value = 'auto';
+      });
+
+      // Form submission
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const file = fileInput.files[0];
+        if (!file) return;
+
+        // Show results card and loading
+        resultsCard.style.display = 'block';
+        loading.classList.add('visible');
+        resultsContainer.innerHTML = '';
+        errorDiv.style.display = 'none';
+        apiInfo.style.display = 'none';
+        identifyBtn.disabled = true;
+        identifyBtn.textContent = '🔄 Identifying...';
+
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('organs', organsInput.value);
+
+          const response = await fetch('/api/plantnet/identify', {
+            method: 'POST',
+            body: formData
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.detail || 'Identification failed');
+          }
+
+          if (data.success && data.plants && data.plants.length > 0) {
+            renderResults(data);
+          } else {
+            resultsContainer.innerHTML = '<div class="no-results">No plants identified. Try a clearer photo or different angle.</div>';
+          }
+
+          // Show API info
+          if (data.remaining_requests !== undefined) {
+            document.getElementById('remaining-requests').textContent = data.remaining_requests;
+            apiInfo.style.display = 'block';
+          }
+
+        } catch (err) {
+          errorDiv.textContent = '❌ ' + err.message;
+          errorDiv.style.display = 'block';
+        } finally {
+          loading.classList.remove('visible');
+          identifyBtn.disabled = false;
+          identifyBtn.textContent = '🔬 Identify Plant';
+        }
+      });
+
+      function renderResults(data) {
+        resultsContainer.innerHTML = '';
+
+        data.plants.forEach((plant, index) => {
+          const isBestMatch = data.best_match && plant.scientific_name === data.best_match;
+          
+          const card = document.createElement('div');
+          card.className = 'plant-card' + (isBestMatch ? ' best-match' : '');
+          
+          let html = '';
+          
+          if (isBestMatch) {
+            html += '<span class="best-badge">✨ Best Match</span>';
+          }
+          
+          html += `<h3>${plant.scientific_name}</h3>`;
+          
+          if (plant.common_names && plant.common_names.length > 0) {
+            html += `<p class="common-names">${plant.common_names.join(', ')}</p>`;
+          }
+          
+          html += `
+            <div class="plant-meta">
+              <span class="tag"><strong>Family:</strong> ${plant.family}</span>
+              <span class="tag"><strong>Genus:</strong> ${plant.genus}</span>
+            </div>
+            <div class="confidence-bar">
+              <div class="fill" style="width: ${plant.confidence}%"></div>
+            </div>
+            <div class="confidence-label">
+              <span>Confidence</span>
+              <span>${plant.confidence}%</span>
+            </div>
+          `;
+          
+          if (plant.reference_images && plant.reference_images.length > 0) {
+            html += '<div class="reference-images">';
+            plant.reference_images.forEach(url => {
+              if (url) {
+                html += `<img src="${url}" alt="Reference" onclick="window.open('${url}', '_blank')" />`;
+              }
+            });
+            html += '</div>';
+          }
+          
+          card.innerHTML = html;
+          resultsContainer.appendChild(card);
+        });
+      }
+    </script>
+  </body>
+</html>
