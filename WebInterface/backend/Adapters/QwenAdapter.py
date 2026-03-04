@@ -1,549 +1,473 @@
 """
-QwenAdapter - Local LLM integration for Akinator-style water quality inference.
-
-This module provides integration with Qwen3.5-9B (or similar) local LLM for
-intelligent questioning and inference about water quality.
+Gemini 3 Flash Adapter for Akinator-style water quality inference.
+Uses OpenAI-compatible API to communicate with helixmind.online/v1
 """
 
 from __future__ import annotations
 
-import os
+import asyncio
 import json
 import logging
-import torch
-from typing import Dict, Any, List, Optional, Tuple
+import os
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List, Optional
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
+# API Configuration
+API_KEY = "helix-iZSwTk_jQXJL_AruhsPN3fmkF_dZzrOHbs6etXUGpsg"
+BASE_URL = "https://helixmind.online/v1"
+MODEL_NAME = "gemini-3-flash-preview"
+
 
 class ConfidenceLevel(Enum):
-    """Confidence levels for Akinator decisions."""
-    LOW = "low"       # < 0.4
-    MEDIUM = "medium" # 0.4 - 0.6
-    HIGH = "high"     # 0.6 - 0.85
-    VERY_HIGH = "very_high"  # > 0.85
+    """Confidence levels for predictions."""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    VERY_HIGH = "very_high"
 
 
 @dataclass
 class AkinatorState:
-    """State for Akinator questioning session."""
+    """State for an Akinator session."""
     session_id: str
-    round_number: int = 0
-    max_rounds: int = 10
-    questions_asked: List[Dict[str, Any]] = field(default_factory=list)
-    answers_received: List[Dict[str, Any]] = field(default_factory=list)
-    current_confidence: float = 0.0
-    current_prediction: Optional[Dict[str, Any]] = None
-    visual_context: Optional[Dict[str, Any]] = None
-    is_complete: bool = False
-    final_result: Optional[Dict[str, Any]] = None
+    question_count: int = 0
+    max_questions: int = 10
+    conversation_history: List[Dict[str, str]] = field(default_factory=list)
+    detection_context: Dict[str, Any] = field(default_factory=dict)
+    user_description: Optional[str] = None
+    started_at: datetime = field(default_factory=datetime.utcnow)
+    cancelled: bool = False
 
 
 @dataclass
 class Question:
-    """Represents a question from the Akinator system."""
+    """A question from the Akinator."""
     question_id: str
-    text: str
-    category: str  # smell, color, clarity, source, usage, etc.
-    options: List[str] = field(default_factory=lambda: ["yes", "no", "maybe", "unsure"])
-    importance: float = 1.0  # How important this question is for inference
+    question_text: str
+    round_number: int
+    context: Optional[str] = None
 
 
 @dataclass
 class InferenceResult:
-    """Result of Akinator inference."""
-    quality_score: float
+    """Final inference result from the Akinator."""
+    predicted_label: str
     confidence: float
-    quality_label: str
+    confidence_level: ConfidenceLevel
     reasoning: str
-    detected_issues: List[str]
-    recommendations: List[str]
-    is_final: bool
+    question_count: int
+    detection_data: Dict[str, Any] = field(default_factory=dict)
 
 
-class QwenAdapter:
+class GeminiAdapter:
     """
-    Adapter for Qwen3.5-9B local LLM integration.
-    
-    Supports GPU/CUDA with CPU fallback for water quality inference
-    through Akinator-style questioning.
+    Adapter for Gemini 3 Flash via OpenAI-compatible API.
+    Handles Akinator-style questioning for water quality inference.
     """
-    
-    # System prompt for water quality Akinator
-    SYSTEM_PROMPT = """You are an expert water quality analyst AI assistant. Your role is to help determine water quality through a series of targeted questions, similar to the Akinator game.
 
-You will be given visual analysis results from computer vision models and should ask clarifying questions to improve the accuracy of your assessment.
-
-Your goals:
-1. Ask targeted questions about observable water characteristics
-2. Gather information efficiently (max 10 rounds)
-3. Provide a confidence score (0-100%) for your assessment
-4. Stop early if you're confident (>85%) before reaching 10 rounds
-
-Question categories to consider:
-- Smell: Any unusual odors (chlorine, sulfur, earthy, chemical, etc.)
-- Color: Water coloration (clear, yellow, brown, green, etc.)
-- Clarity: Turbidity, particles visible, sediment
-- Source: Where the water comes from (tap, well, river, rain, etc.)
-- Usage: Intended use (drinking, cooking, bathing, irrigation)
-- Location: Geographic context if relevant
-- Time: How long stored, seasonal factors
-
-Always respond in JSON format with:
-{
-    "question": "your question text",
-    "category": "category name",
-    "options": ["yes", "no", "maybe", "unsure"],
-    "importance": 0.0-1.0,
-    "current_confidence": 0-100,
-    "reasoning": "brief explanation of why you're asking this"
-}
-
-If you have enough information to make a final assessment, respond with:
-{
-    "is_final": true,
-    "quality_score": 0-100,
-    "confidence": 0-100,
-    "quality_label": "Excellent/Good/Moderate/Poor/Critical",
-    "reasoning": "detailed explanation",
-    "detected_issues": ["issue1", "issue2"],
-    "recommendations": ["rec1", "rec2"]
-}"""
-
-    def __init__(self, model_path: Optional[str] = None, device: Optional[str] = None):
-        """
-        Initialize the Qwen adapter.
-        
-        Args:
-            model_path: Path to the Qwen model. If None, uses default.
-            device: Device to use ('cuda', 'cpu', or 'auto' for auto-detect).
-        """
-        self.model = None
-        self.tokenizer = None
-        self.device = self._detect_device() if device is None else device
-        self.model_path = model_path
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
+    ):
+        """Initialize the Gemini adapter with API configuration."""
+        self.api_key = api_key or API_KEY
+        self.base_url = base_url or BASE_URL
+        self.model = model or MODEL_NAME
         self._initialized = False
-        self._executor = ThreadPoolExecutor(max_workers=1)
-        
-    def _detect_device(self) -> str:
-        """Detect the best available device."""
-        if torch.cuda.is_available():
-            logger.info(f"CUDA available: {torch.cuda.get_device_name(0)}")
-            return "cuda"
-        logger.info("CUDA not available, using CPU")
-        return "cpu"
-    
-    def _get_model_path(self) -> str:
-        """Get the model path, checking environment variables."""
-        if self.model_path:
-            return self.model_path
-        
-        # Check environment variable
-        env_path = os.environ.get("QWEN_MODEL_PATH")
-        if env_path:
-            return env_path
-        
-        # Default paths to check
-        default_paths = [
-            "./models/Qwen2.5-7B-Instruct",
-            "./models/Qwen3.5-9B",
-            "~/.cache/huggingface/hub/models--Qwen--Qwen2.5-7B-Instruct",
-        ]
-        
-        for path in default_paths:
-            expanded = os.path.expanduser(path)
-            if os.path.exists(expanded):
-                return expanded
-        
-        # Return HuggingFace model ID for auto-download
-        return "Qwen/Qwen2.5-7B-Instruct"
-    
+        self._client: Optional[httpx.AsyncClient] = None
+
     async def initialize(self) -> bool:
-        """
-        Initialize the model asynchronously.
-        
-        Returns:
-            True if initialization successful, False otherwise.
-        """
-        if self._initialized:
-            return True
-            
+        """Initialize the HTTP client and verify API connectivity."""
         try:
-            # Run initialization in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            success = await loop.run_in_executor(self._executor, self._init_model)
-            self._initialized = success
-            return success
-        except Exception as e:
-            logger.error(f"Failed to initialize Qwen model: {e}")
-            return False
-    
-    def _init_model(self) -> bool:
-        """Initialize the model (runs in thread pool)."""
-        try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-            
-            model_path = self._get_model_path()
-            logger.info(f"Loading Qwen model from: {model_path}")
-            
-            # Load tokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                model_path,
-                trust_remote_code=True
+            self._client = httpx.AsyncClient(
+                base_url=self.base_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=60.0,
             )
             
-            # Load model with appropriate settings
-            if self.device == "cuda":
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    model_path,
-                    torch_dtype=torch.float16,
-                    device_map="auto",
-                    trust_remote_code=True
-                )
-            else:
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    model_path,
-                    torch_dtype=torch.float32,
-                    device_map="cpu",
-                    trust_remote_code=True,
-                    low_cpu_mem_usage=True
-                )
-            
-            self.model.eval()
-            logger.info(f"Qwen model loaded successfully on {self.device}")
+            # Test connectivity with a simple request
+            try:
+                response = await self._client.get("/models")
+                if response.status_code in (200, 401, 403):
+                    self._initialized = True
+                    logger.info(f"GeminiAdapter initialized successfully. Model: {self.model}")
+                    return True
+            except httpx.ConnectError:
+                logger.warning(f"Could not connect to {self.base_url}, will retry on use")
+                self._initialized = True  # Allow lazy initialization
+                return True
+
+            self._initialized = True
             return True
-            
-        except ImportError as e:
-            logger.error(f"Transformers library not available: {e}")
-            return False
         except Exception as e:
-            logger.error(f"Error loading model: {e}")
+            logger.error(f"Failed to initialize GeminiAdapter: {e}")
             return False
-    
-    def is_ready(self) -> bool:
-        """Check if the adapter is ready for inference."""
-        return self._initialized and self.model is not None and self.tokenizer is not None
-    
-    async def generate_question(
+
+    async def _make_api_request(
         self,
-        state: AkinatorState,
-        visual_context: Optional[Dict[str, Any]] = None
-    ) -> Question:
-        """
-        Generate the next question based on current state.
-        
-        Args:
-            state: Current Akinator session state.
-            visual_context: Visual analysis results from CV models.
+        messages: List[Dict[str, str]],
+        max_tokens: int = 500,
+        temperature: float = 0.7,
+    ) -> Optional[str]:
+        """Make a chat completion request to the API."""
+        if not self._client:
+            await self.initialize()
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+
+        try:
+            response = await self._client.post(
+                "/chat/completions",
+                json=payload,
+            )
             
-        Returns:
-            The next question to ask.
-        """
-        if not self.is_ready():
-            # Return a default question if model not ready
-            return self._get_fallback_question(state)
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            else:
+                logger.error(f"API request failed: {response.status_code} - {response.text}")
+                return None
+        except Exception as e:
+            logger.error(f"API request error: {e}")
+            return None
+
+    def _build_system_prompt(self, state: AkinatorState) -> str:
+        """Build the system prompt with detection context."""
+        base_prompt = """You are HydroScan's Akinator AI, an intelligent water quality analysis assistant. Your role is to help identify water quality conditions through interactive questioning.
+
+WATER QUALITY CATEGORIES:
+- Clean: Clear, safe water with no visible contamination
+- Dirty: Water with visible contamination, discoloration, or debris
+- NotWater: Image doesn't contain water at all
+
+DETECTION CONTEXT (from image analysis):
+"""
         
-        # Build context for the model
-        context = self._build_context(state, visual_context)
+        # Add detection context if available
+        context_parts = []
+        detection = state.detection_context
         
-        # Generate response
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            self._executor,
-            lambda: self._generate_response(context)
-        )
+        if detection:
+            if "detection_rate" in detection:
+                context_parts.append(f"- Current detection rate: {detection['detection_rate']:.1%}")
+            if "water_found" in detection:
+                context_parts.append(f"- Water detected: {detection['water_found']}")
+            if "objects_detected" in detection:
+                context_parts.append(f"- Objects found: {', '.join(detection['objects_detected'])}")
+            if "place_classification" in detection:
+                context_parts.append(f"- Scene type: {detection['place_classification']}")
+            if "confidence" in detection:
+                context_parts.append(f"- Detection confidence: {detection['confidence']:.1%}")
         
-        # Parse response into Question
-        return self._parse_question_response(response, state.round_number)
-    
-    async def process_answer(
-        self,
-        state: AkinatorState,
-        answer: str,
-        question_id: str
-    ) -> Tuple[Optional[Question], Optional[InferenceResult]]:
-        """
-        Process a user's answer and determine next action.
+        if state.user_description:
+            context_parts.append(f"- USER DESCRIPTION: {state.user_description}")
         
-        Args:
-            state: Current Akinator session state.
-            answer: User's answer to the last question.
-            question_id: ID of the question being answered.
-            
-        Returns:
-            Tuple of (next_question or None, inference_result or None).
-            If inference_result is not None, the session is complete.
-        """
-        # Record the answer
-        state.answers_received.append({
-            "question_id": question_id,
-            "answer": answer,
-            "round": state.round_number
-        })
-        
-        # Check if we should make a final prediction
-        if state.current_confidence >= 0.85 or state.round_number >= state.max_rounds - 1:
-            result = await self._make_final_prediction(state)
-            state.is_complete = True
-            state.final_result = result.__dict__
-            return None, result
-        
-        # Generate next question
-        next_question = await self.generate_question(state)
-        state.round_number += 1
-        
-        return next_question, None
-    
-    async def _make_final_prediction(self, state: AkinatorState) -> InferenceResult:
-        """Make the final quality prediction."""
-        if not self.is_ready():
-            return self._get_fallback_prediction(state)
-        
-        context = self._build_context(state, None)
-        context += "\n\nBased on all the information gathered, provide your final assessment."
-        
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            self._executor,
-            lambda: self._generate_response(context, max_tokens=500)
-        )
-        
-        return self._parse_final_response(response)
-    
-    def _build_context(
-        self,
-        state: AkinatorState,
-        visual_context: Optional[Dict[str, Any]]
-    ) -> str:
-        """Build the context string for the model."""
-        context_parts = [self.SYSTEM_PROMPT]
-        
-        # Add visual context if available
-        if visual_context:
-            context_parts.append("\n\nVisual Analysis Results:")
-            context_parts.append(json.dumps(visual_context, indent=2))
+        if context_parts:
+            base_prompt += "\n".join(context_parts)
+        else:
+            base_prompt += "- No detection data available yet"
+
+        base_prompt += """
+
+QUESTIONING RULES:
+1. Ask ONE clear, specific question at a time
+2. Questions should be answerable with short sentences (not just yes/no)
+3. Focus on details that help distinguish between Clean, Dirty, or NotWater
+4. Consider the user's description and detection context
+5. After max 10 questions, provide your final assessment
+
+QUESTION FORMAT: Just ask the question directly, nothing else."""
+
+        return base_prompt
+
+    def _build_question_context(self, state: AkinatorState) -> List[Dict[str, str]]:
+        """Build the conversation context for generating a question."""
+        messages = [
+            {"role": "system", "content": self._build_system_prompt(state)},
+        ]
         
         # Add conversation history
-        if state.questions_asked or state.answers_received:
-            context_parts.append("\n\nConversation History:")
-            for i, q in enumerate(state.questions_asked):
-                context_parts.append(f"\nQ{i+1}: {q.get('text', '')}")
-                if i < len(state.answers_received):
-                    a = state.answers_received[i]
-                    context_parts.append(f"A{i+1}: {a.get('answer', '')}")
+        for entry in state.conversation_history:
+            messages.append(entry)
         
-        # Add current state
-        context_parts.append(f"\n\nCurrent Round: {state.round_number + 1}/{state.max_rounds}")
-        context_parts.append(f"Current Confidence: {state.current_confidence * 100:.1f}%")
+        # Add instruction for next question
+        if state.question_count == 0:
+            messages.append({
+                "role": "user",
+                "content": f"Start the questioning. Round {state.question_count + 1}/{state.max_questions}. Ask your first question to help identify the water quality."
+            })
+        else:
+            messages.append({
+                "role": "user",
+                "content": f"Based on my answer, ask your next question. Round {state.question_count + 1}/{state.max_questions}."
+            })
         
-        return "\n".join(context_parts)
-    
-    def _generate_response(
+        return messages
+
+    async def generate_question(
         self,
-        context: str,
-        max_tokens: int = 300
-    ) -> str:
-        """Generate a response from the model."""
-        try:
-            inputs = self.tokenizer(context, return_tensors="pt")
-            inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
-            
-            with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=max_tokens,
-                    temperature=0.7,
-                    top_p=0.9,
-                    do_sample=True,
-                    pad_token_id=self.tokenizer.eos_token_id
-                )
-            
-            response = self.tokenizer.decode(
-                outputs[0][inputs["input_ids"].shape[1]:],
-                skip_special_tokens=True
-            )
-            
-            return response.strip()
-            
-        except Exception as e:
-            logger.error(f"Error generating response: {e}")
-            return ""
-    
-    def _parse_question_response(
-        self,
-        response: str,
-        round_num: int
+        session_id: str,
+        detection_context: Dict[str, Any],
+        user_description: Optional[str] = None,
     ) -> Question:
-        """Parse model response into a Question object."""
-        try:
-            # Try to extract JSON from response
-            json_start = response.find("{")
-            json_end = response.rfind("}") + 1
-            
-            if json_start >= 0 and json_end > json_start:
-                json_str = response[json_start:json_end]
-                data = json.loads(json_str)
-                
-                return Question(
-                    question_id=f"q_{round_num}_{hash(response) % 10000}",
-                    text=data.get("question", "Is the water clear?"),
-                    category=data.get("category", "clarity"),
-                    options=data.get("options", ["yes", "no", "maybe", "unsure"]),
-                    importance=float(data.get("importance", 1.0))
-                )
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.warning(f"Failed to parse question response: {e}")
-        
-        # Return default question if parsing fails
-        return self._get_fallback_question_from_response(response, round_num)
-    
-    def _parse_final_response(self, response: str) -> InferenceResult:
-        """Parse model response into an InferenceResult."""
-        try:
-            json_start = response.find("{")
-            json_end = response.rfind("}") + 1
-            
-            if json_start >= 0 and json_end > json_start:
-                json_str = response[json_start:json_end]
-                data = json.loads(json_str)
-                
-                return InferenceResult(
-                    quality_score=float(data.get("quality_score", 50)),
-                    confidence=float(data.get("confidence", 50)) / 100,
-                    quality_label=data.get("quality_label", "Moderate"),
-                    reasoning=data.get("reasoning", "Based on available information."),
-                    detected_issues=data.get("detected_issues", []),
-                    recommendations=data.get("recommendations", []),
-                    is_final=True
-                )
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.warning(f"Failed to parse final response: {e}")
-        
-        return InferenceResult(
-            quality_score=50,
-            confidence=0.5,
-            quality_label="Moderate",
-            reasoning="Unable to determine precise quality from available information.",
-            detected_issues=[],
-            recommendations=["Consider professional testing for accurate results."],
-            is_final=True
+        """Generate the next question for the Akinator session."""
+        # Create or get state
+        state = AkinatorState(
+            session_id=session_id,
+            detection_context=detection_context,
+            user_description=user_description,
         )
-    
-    def _get_fallback_question(self, state: AkinatorState) -> Question:
-        """Get a fallback question when model is unavailable."""
-        # Predefined questions based on round number
-        fallback_questions = [
-            Question("fq_0", "Does the water have any unusual smell?", "smell"),
-            Question("fq_1", "Is the water clear or does it appear cloudy?", "clarity"),
-            Question("fq_2", "What color is the water?", "color", 
-                    ["clear", "yellowish", "brown", "green", "other"]),
-            Question("fq_3", "What is the source of this water?", "source",
-                    ["tap", "well", "river", "rain", "bottled", "other"]),
-            Question("fq_4", "Is this water intended for drinking?", "usage"),
-            Question("fq_5", "Have you noticed any sediment or particles in the water?", "clarity"),
-            Question("fq_6", "How long has this water been stored?", "time"),
-            Question("fq_7", "Is there any visible film or scum on the surface?", "appearance"),
-            Question("fq_8", "Does the water taste normal if you've tried it?", "taste",
-                    ["yes", "no", "haven't tried", "unusual"]),
-            Question("fq_9", "Are there any known water quality issues in your area?", "location"),
+
+        messages = self._build_question_context(state)
+        response = await self._make_api_request(messages, max_tokens=200, temperature=0.7)
+
+        if response:
+            question_text = response.strip()
+        else:
+            question_text = self._get_fallback_question(state)
+
+        return Question(
+            question_id=str(uuid.uuid4()),
+            question_text=question_text,
+            round_number=state.question_count + 1,
+            context=json.dumps(detection_context) if detection_context else None,
+        )
+
+    async def process_answer(
+        self,
+        session_id: str,
+        state: AkinatorState,
+        answer: str,
+    ) -> tuple[Optional[Question], Optional[InferenceResult]]:
+        """
+        Process user's answer and either generate next question or make final prediction.
+        
+        Returns:
+            Tuple of (next_question, final_result) - one will be None
+        """
+        # Record the answer in conversation history
+        # Find the last question from history or use a placeholder
+        last_question = "What is the water condition?"
+        for i in range(len(state.conversation_history) - 1, -1, -1):
+            if state.conversation_history[i].get("role") == "assistant":
+                last_question = state.conversation_history[i].get("content", last_question)
+                break
+        
+        state.conversation_history.append({
+            "role": "user",
+            "content": f"Q: {last_question}\nMy answer: {answer}"
+        })
+        state.question_count += 1
+
+        # Check if we should make a final prediction
+        should_predict = (
+            state.question_count >= state.max_questions or
+            state.cancelled or
+            self._should_early_predict(state)
+        )
+
+        if should_predict:
+            result = await self._make_final_prediction(state)
+            return None, result
+
+        # Generate next question
+        messages = self._build_question_context(state)
+        response = await self._make_api_request(messages, max_tokens=200, temperature=0.7)
+
+        if response:
+            question_text = response.strip()
+        else:
+            question_text = self._get_fallback_question(state)
+
+        next_question = Question(
+            question_id=str(uuid.uuid4()),
+            question_text=question_text,
+            round_number=state.question_count + 1,
+        )
+
+        return next_question, None
+
+    def _should_early_predict(self, state: AkinatorState) -> bool:
+        """Determine if we have enough confidence to predict early."""
+        # Simple heuristic: predict early if we have strong signals
+        # This could be enhanced with actual confidence tracking
+        return False  # For now, use all questions
+
+    async def _make_final_prediction(self, state: AkinatorState) -> InferenceResult:
+        """Generate the final water quality prediction."""
+        system_prompt = self._build_system_prompt(state)
+        
+        messages = [
+            {"role": "system", "content": system_prompt + """
+
+Now provide your FINAL ASSESSMENT in this exact JSON format:
+{
+    "label": "Clean" | "Dirty" | "NotWater",
+    "confidence": 0.0-1.0,
+    "reasoning": "Brief explanation of your conclusion"
+}
+
+Only output the JSON, nothing else."""},
         ]
         
-        idx = min(state.round_number, len(fallback_questions) - 1)
-        return fallback_questions[idx]
-    
-    def _get_fallback_question_from_response(
-        self,
-        response: str,
-        round_num: int
-    ) -> Question:
-        """Create a question from unstructured response text."""
-        # Extract any question-like sentence
-        sentences = response.replace("?", "?|").split("|")
-        for s in sentences:
-            s = s.strip()
-            if s and (s.endswith("?") or "ask" in s.lower() or "question" in s.lower()):
-                return Question(
-                    question_id=f"fq_{round_num}",
-                    text=s if s.endswith("?") else s + "?",
-                    category="general"
-                )
+        # Add full conversation history
+        for entry in state.conversation_history:
+            messages.append(entry)
         
-        return self._get_fallback_question(AkinatorState(session_id="fallback"))
-    
-    def _get_fallback_prediction(self, state: AkinatorState) -> InferenceResult:
-        """Get a fallback prediction when model is unavailable."""
-        # Simple heuristic based on answers
-        score = 70  # Default to good quality
-        issues = []
-        
-        for answer in state.answers_received:
-            ans = answer.get("answer", "").lower()
-            if ans in ["no", "unsure"]:
-                score -= 5
-            if "smell" in str(state.questions_asked) and ans == "yes":
-                score -= 15
-                issues.append("Unusual odor detected")
-            if "cloudy" in ans or "brown" in ans or "yellow" in ans:
-                score -= 10
-                issues.append("Water discoloration")
-        
-        score = max(0, min(100, score))
-        
-        if score >= 80:
-            label = "Good"
-        elif score >= 60:
-            label = "Moderate"
+        messages.append({
+            "role": "user",
+            "content": f"Based on all {state.question_count} rounds of questioning, provide your final assessment now."
+        })
+
+        response = await self._make_api_request(messages, max_tokens=300, temperature=0.3)
+
+        if response:
+            result = self._parse_final_response(response, state)
         else:
-            label = "Poor"
+            result = self._get_fallback_prediction(state)
+
+        return result
+
+    def _parse_final_response(self, response: str, state: AkinatorState) -> InferenceResult:
+        """Parse the API response into an InferenceResult."""
+        try:
+            # Try to extract JSON from the response
+            json_match = response
+            if "{" in response and "}" in response:
+                start = response.index("{")
+                end = response.rindex("}") + 1
+                json_match = response[start:end]
+            
+            data = json.loads(json_match)
+            
+            label = data.get("label", "Unknown")
+            confidence = float(data.get("confidence", 0.5))
+            reasoning = data.get("reasoning", "Based on the questioning")
+
+            # Determine confidence level
+            if confidence >= 0.9:
+                level = ConfidenceLevel.VERY_HIGH
+            elif confidence >= 0.7:
+                level = ConfidenceLevel.HIGH
+            elif confidence >= 0.5:
+                level = ConfidenceLevel.MEDIUM
+            else:
+                level = ConfidenceLevel.LOW
+
+            # If cancelled early, reduce confidence
+            if state.cancelled:
+                confidence = min(confidence * 0.8, 0.7)  # Cap at 70% for early cancellation
+                reasoning += " (Confidence reduced due to early cancellation)"
+                level = ConfidenceLevel.MEDIUM if level == ConfidenceLevel.HIGH else level
+
+            return InferenceResult(
+                predicted_label=label,
+                confidence=confidence,
+                confidence_level=level,
+                reasoning=reasoning,
+                question_count=state.question_count,
+                detection_data=state.detection_context,
+            )
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            logger.error(f"Failed to parse final response: {e}")
+            return self._get_fallback_prediction(state)
+
+    def _get_fallback_question(self, state: AkinatorState) -> str:
+        """Get a fallback question if API fails."""
+        fallback_questions = [
+            "Can you describe the color of the water you see?",
+            "Is there any visible debris or particles in the water?",
+            "Does the water appear clear or murky?",
+            "Can you see through the water to the bottom?",
+            "Is there any foam or scum on the water surface?",
+            "What is the surrounding environment like (natural, urban, indoor)?",
+            "Is the water flowing or stagnant?",
+            "Are there any plants or algae visible in or around the water?",
+            "Does the water have any unusual coloration (green, brown, yellow)?",
+            "Is there anyone using or interacting with the water?",
+        ]
+        
+        idx = min(state.question_count, len(fallback_questions) - 1)
+        return fallback_questions[idx]
+
+    def _get_fallback_prediction(self, state: AkinatorState) -> InferenceResult:
+        """Get a fallback prediction if API fails."""
+        # Analyze conversation for hints
+        conversation_text = " ".join([
+            entry.get("content", "") for entry in state.conversation_history
+        ]).lower()
+
+        # Simple keyword-based prediction
+        dirty_keywords = ["dirty", "murky", "brown", "green", "polluted", "debris", "trash", "foam", "algae"]
+        clean_keywords = ["clear", "clean", "transparent", "blue", "fresh", "drinking"]
+        notwater_keywords = ["no water", "not water", "dry", "land", "ground", "floor"]
+
+        dirty_count = sum(1 for kw in dirty_keywords if kw in conversation_text)
+        clean_count = sum(1 for kw in clean_keywords if kw in conversation_text)
+        notwater_count = sum(1 for kw in notwater_keywords if kw in conversation_text)
+
+        if notwater_count > max(dirty_count, clean_count):
+            label = "NotWater"
+            confidence = 0.5 + (notwater_count * 0.1)
+        elif dirty_count > clean_count:
+            label = "Dirty"
+            confidence = 0.5 + (dirty_count * 0.1)
+        else:
+            label = "Clean"
+            confidence = 0.5 + (clean_count * 0.1)
+
+        confidence = min(confidence, 0.85)
         
         return InferenceResult(
-            quality_score=score,
-            confidence=0.5,
-            quality_label=label,
-            reasoning="Assessment based on user responses.",
-            detected_issues=issues,
-            recommendations=["Consider professional testing for confirmation."],
-            is_final=True
+            predicted_label=label,
+            confidence=confidence,
+            confidence_level=ConfidenceLevel.MEDIUM,
+            reasoning="Fallback prediction based on conversation analysis",
+            question_count=state.question_count,
+            detection_data=state.detection_context,
         )
-    
-    async def close(self):
-        """Clean up resources."""
-        if self._executor:
-            self._executor.shutdown(wait=True)
-        
-        if self.model:
-            del self.model
-            self.model = None
-        
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        
+
+    async def close(self) -> None:
+        """Close the HTTP client."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
         self._initialized = False
 
 
-# Singleton instance
-_qwen_adapter: Optional[QwenAdapter] = None
+# Module-level adapter instance (renamed for compatibility)
+_adapter: Optional[GeminiAdapter] = None
 
 
-async def get_qwen_adapter() -> QwenAdapter:
-    """Get or create the Qwen adapter singleton."""
-    global _qwen_adapter
-    
-    if _qwen_adapter is None:
-        _qwen_adapter = QwenAdapter()
-        await _qwen_adapter.initialize()
-    
-    return _qwen_adapter
+async def get_qwen_adapter() -> GeminiAdapter:
+    """Get or create the Gemini adapter instance (named for backward compatibility)."""
+    global _adapter
+    if _adapter is None:
+        _adapter = GeminiAdapter()
+        await _adapter.initialize()
+    return _adapter
 
 
-async def close_qwen_adapter():
-    """Close the Qwen adapter singleton."""
-    global _qwen_adapter
-    
-    if _qwen_adapter:
-        await _qwen_adapter.close()
-        _qwen_adapter = None
+async def close_qwen_adapter() -> None:
+    """Close the Gemini adapter (named for backward compatibility)."""
+    global _adapter
+    if _adapter:
+        await _adapter.close()
+        _adapter = None

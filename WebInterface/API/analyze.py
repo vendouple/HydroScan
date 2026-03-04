@@ -634,7 +634,9 @@ def _analyze_packaging(aggregation: Dict[str, Any]) -> Dict[str, Any]:
     non_water_brand: Optional[str] = None
 
     for det in detections:
-        name = (det.get("class_name") or "").lower()
+        class_name_raw = det.get("class_name", "")
+        # Handle case where class_name might be an integer or other non-string type
+        name = str(class_name_raw).lower() if class_name_raw is not None else ""
         if not name:
             continue
         if any(keyword in name for keyword in PACKAGING_KEYWORDS):
@@ -647,7 +649,7 @@ def _analyze_packaging(aggregation: Dict[str, Any]) -> Dict[str, Any]:
                 non_water_brand = name
 
     water_visible = any(
-        "water" in (det.get("class_name") or "").lower() for det in detections
+        "water" in str(det.get("class_name") or "").lower() for det in detections
     )
 
     return {

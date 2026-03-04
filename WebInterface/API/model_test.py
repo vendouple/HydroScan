@@ -15,13 +15,13 @@ router = APIRouter()
 
 @router.post("/model-test")
 async def test_model(
-    image: UploadFile = File(...), model: str = Form(...)
+    file: UploadFile = File(...), model: str = Form(...)
 ) -> Dict[str, Any]:
     """Test individual models with detailed diagnostics and stack traces."""
 
     try:
         # Load image
-        image_data = await image.read()
+        image_data = await file.read()
         pil_image = Image.open(io.BytesIO(image_data)).convert("RGB")
 
         result = {"model": model, "success": False, "error": None, "stack_trace": None}

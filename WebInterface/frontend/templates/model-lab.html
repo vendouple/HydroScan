@@ -8,7 +8,12 @@
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
     <style>
-      /* Model Lab specific styles */
+      /* Model Lab Premium Styling */
+      body {
+        background: var(--dark, #0a0a0f);
+        min-height: 100vh;
+      }
+      
       .model-lab-container {
         max-width: var(--max-width);
         margin: 0 auto;
@@ -19,9 +24,47 @@
         z-index: 1;
       }
       
+      /* Navigation */
+      .top-nav {
+        display: flex;
+        justify-content: center;
+        gap: 16px;
+        margin-top: 16px;
+      }
+      
+      .top-nav a {
+        color: rgba(255, 255, 255, 0.6);
+        text-decoration: none;
+        font-size: 0.9rem;
+        padding: 8px 16px;
+        border-radius: 20px;
+        border: 1px solid transparent;
+        transition: all 0.3s ease;
+      }
+      
+      .top-nav a:hover {
+        color: var(--primary, #00d4ff);
+        background: rgba(0, 212, 255, 0.1);
+        border-color: rgba(0, 212, 255, 0.2);
+      }
+      
+      /* Model Categories */
+      .model-category {
+        margin-bottom: 16px;
+      }
+      
+      .model-category-title {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: rgba(255, 255, 255, 0.4);
+        margin-bottom: 10px;
+        padding-left: 4px;
+      }
+      
       .model-selector {
         display: flex;
-        gap: 12px;
+        gap: 10px;
         flex-wrap: wrap;
       }
       
@@ -29,24 +72,151 @@
         background: rgba(255, 255, 255, 0.05);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
-        padding: 12px 20px;
-        color: var(--text);
+        padding: 12px 18px;
+        color: rgba(255, 255, 255, 0.8);
         font-size: 0.9rem;
         cursor: pointer;
         transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+      }
+      
+      .model-btn::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.5), transparent);
+        opacity: 0;
+        transition: opacity 0.3s ease;
       }
       
       .model-btn:hover {
         background: rgba(0, 212, 255, 0.1);
-        border-color: var(--primary);
+        border-color: rgba(0, 212, 255, 0.3);
+        color: var(--primary, #00d4ff);
+      }
+      
+      .model-btn:hover::before {
+        opacity: 1;
       }
       
       .model-btn.active {
-        background: linear-gradient(135deg, rgba(0, 212, 255, 0.2), rgba(0, 255, 136, 0.15));
-        border-color: var(--primary);
-        box-shadow: 0 0 20px rgba(0, 212, 255, 0.2);
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.15), rgba(0, 255, 136, 0.1));
+        border-color: rgba(0, 212, 255, 0.4);
+        color: var(--primary, #00d4ff);
+        box-shadow: 0 0 20px rgba(0, 212, 255, 0.15);
       }
       
+      .model-btn.active::before {
+        opacity: 1;
+      }
+      
+      .model-btn .model-tag {
+        display: block;
+        font-size: 0.7rem;
+        color: rgba(255, 255, 255, 0.4);
+        margin-top: 4px;
+      }
+      
+      .model-btn.active .model-tag {
+        color: rgba(0, 255, 136, 0.7);
+      }
+      
+      /* Upload Zone */
+      .upload-zone {
+        border: 2px dashed rgba(255, 255, 255, 0.15);
+        border-radius: 16px;
+        padding: 40px 24px;
+        text-align: center;
+        transition: all 0.3s ease;
+        cursor: pointer;
+        background: rgba(255, 255, 255, 0.02);
+      }
+      
+      .upload-zone:hover,
+      .upload-zone.dragover {
+        border-color: rgba(0, 212, 255, 0.4);
+        background: rgba(0, 212, 255, 0.05);
+      }
+      
+      .upload-zone-icon {
+        font-size: 3rem;
+        margin-bottom: 16px;
+        opacity: 0.5;
+      }
+      
+      .upload-zone-text {
+        font-size: 1rem;
+        color: rgba(255, 255, 255, 0.6);
+        margin-bottom: 8px;
+      }
+      
+      .upload-zone-hint {
+        font-size: 0.85rem;
+        color: rgba(255, 255, 255, 0.4);
+      }
+      
+      .upload-zone input[type="file"] {
+        display: none;
+      }
+      
+      /* Preview Image */
+      .preview-container {
+        margin-top: 20px;
+        display: none;
+      }
+      
+      .preview-container.has-image {
+        display: block;
+      }
+      
+      .preview-image {
+        max-width: 100%;
+        max-height: 300px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        object-fit: contain;
+      }
+      
+      .preview-info {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 12px;
+        padding: 12px 16px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 10px;
+      }
+      
+      .preview-name {
+        font-size: 0.9rem;
+        color: rgba(255, 255, 255, 0.8);
+      }
+      
+      .preview-size {
+        font-size: 0.8rem;
+        color: rgba(255, 255, 255, 0.5);
+      }
+      
+      .remove-preview {
+        background: rgba(248, 113, 113, 0.1);
+        border: 1px solid rgba(248, 113, 113, 0.2);
+        color: var(--error, #f87171);
+        padding: 6px 12px;
+        border-radius: 8px;
+        font-size: 0.8rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      
+      .remove-preview:hover {
+        background: rgba(248, 113, 113, 0.2);
+      }
+      
+      /* Results */
       .test-results {
         display: grid;
         gap: 20px;
@@ -71,135 +241,373 @@
       }
       
       .metric-item {
-        background: rgba(255, 255, 255, 0.05);
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 12px;
         padding: 16px;
         text-align: center;
+        transition: all 0.3s ease;
+      }
+      
+      .metric-item:hover {
+        background: rgba(0, 212, 255, 0.05);
+        border-color: rgba(0, 212, 255, 0.2);
       }
       
       .metric-label {
-        font-size: 0.8rem;
-        color: var(--text-muted);
-        margin-bottom: 4px;
+        font-size: 0.75rem;
+        color: rgba(255, 255, 255, 0.5);
+        margin-bottom: 6px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
       }
       
       .metric-value {
-        font-size: 1.4rem;
+        font-size: 1.5rem;
         font-weight: 600;
-        background: linear-gradient(135deg, var(--primary), var(--accent-green));
+        background: linear-gradient(135deg, var(--primary, #00d4ff), var(--accent-green, #00ff88));
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
       }
       
-      .error-message {
+      /* Error Display */
+      .error-container {
         background: rgba(248, 113, 113, 0.1);
         border: 1px solid rgba(248, 113, 113, 0.3);
         border-radius: 12px;
-        padding: 16px;
-        color: var(--error);
+        padding: 20px;
       }
       
-      .nav-links {
+      .error-title {
+        color: var(--error, #f87171);
+        font-weight: 600;
+        margin-bottom: 12px;
         display: flex;
-        gap: 16px;
+        align-items: center;
+        gap: 8px;
+      }
+      
+      .error-message {
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 0.9rem;
+        line-height: 1.5;
+      }
+      
+      .stack-trace {
+        margin-top: 16px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 8px;
+        padding: 16px;
+        font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        font-size: 0.8rem;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        color: rgba(255, 255, 255, 0.6);
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      
+      /* Detection Results */
+      .detection-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
         margin-top: 16px;
       }
       
-      .nav-links a {
-        color: var(--text-muted);
-        text-decoration: none;
-        font-size: 0.9rem;
-        transition: color 0.3s ease;
+      .detection-item {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        padding: 12px 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
       }
       
-      .nav-links a:hover {
-        color: var(--primary);
+      .detection-label {
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.9);
+      }
+      
+      .detection-confidence {
+        background: rgba(0, 255, 136, 0.15);
+        color: var(--accent-green, #00ff88);
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 500;
+      }
+      
+      .detection-confidence.low {
+        background: rgba(248, 113, 113, 0.15);
+        color: var(--error, #f87171);
+      }
+      
+      .detection-confidence.medium {
+        background: rgba(251, 191, 36, 0.15);
+        color: #fbbf24;
+      }
+      
+      /* Raw JSON Output */
+      .raw-output {
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 12px;
+        padding: 16px;
+        margin-top: 16px;
+      }
+      
+      .raw-output pre {
+        margin: 0;
+        font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        font-size: 0.8rem;
+        overflow-x: auto;
+        color: rgba(255, 255, 255, 0.7);
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      
+      /* Loading State */
+      .loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(10, 10, 15, 0.8);
+        backdrop-filter: blur(8px);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.3s ease;
+      }
+      
+      .loading-overlay.visible {
+        opacity: 1;
+        visibility: visible;
+      }
+      
+      .loading-spinner {
+        width: 48px;
+        height: 48px;
+        border: 3px solid rgba(255, 255, 255, 0.1);
+        border-top-color: var(--primary, #00d4ff);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      
+      .loading-text {
+        margin-top: 16px;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 0.95rem;
+      }
+      
+      /* Status Badge */
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 500;
+      }
+      
+      .status-badge.success {
+        background: rgba(0, 255, 136, 0.15);
+        color: var(--accent-green, #00ff88);
+        border: 1px solid rgba(0, 255, 136, 0.3);
+      }
+      
+      .status-badge.error {
+        background: rgba(248, 113, 113, 0.15);
+        color: var(--error, #f87171);
+        border: 1px solid rgba(248, 113, 113, 0.3);
+      }
+      
+      /* Responsive */
+      @media (max-width: 768px) {
+        .model-lab-container {
+          padding: 8px 16px 32px;
+        }
+        
+        .metrics-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        
+        .upload-zone {
+          padding: 30px 16px;
+        }
       }
     </style>
   </head>
   <body>
     <!-- Particle Background -->
-    <div class="particles-background"></div>
+    <div class="particles-background" aria-hidden="true"></div>
+    
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Running model inference...</div>
+    </div>
     
     <header class="hero premium">
       <h1>Model Lab</h1>
-      <p class="subtitle">Test and evaluate different AI models for water quality analysis</p>
-      <div class="nav-links">
+      <p class="subtitle">Test and evaluate individual AI models for water quality analysis</p>
+      <div class="top-nav">
         <a href="/">Home</a>
         <a href="/app">Analysis App</a>
       </div>
     </header>
 
     <div class="model-lab-container">
+      <!-- Model Selection Card -->
       <div class="card premium">
         <div class="card-header">
           <h2>Select Model</h2>
-          <p class="card-subtitle">Choose a model backend to test</p>
+          <p class="card-subtitle">Choose a model to test</p>
         </div>
-        <div class="model-selector">
-          <button class="model-btn active" data-model="rfdetr">RF-DETR</button>
-          <button class="model-btn" data-model="inmodel">InModel (Custom)</button>
-          <button class="model-btn" data-model="place365">Place365 (Scene)</button>
+        
+        <!-- In-House Models -->
+        <div class="model-category">
+          <div class="model-category-title">In-House Models (Custom Trained)</div>
+          <div class="model-selector">
+            <button class="model-btn" data-model="inmodel-obb">
+              OBB Detection
+              <span class="model-tag">Oriented Bounding Box</span>
+            </button>
+            <button class="model-btn" data-model="inmodel-classification">
+              Classification
+              <span class="model-tag">Water Quality Cls</span>
+            </button>
+          </div>
+        </div>
+        
+        <!-- External Models -->
+        <div class="model-category">
+          <div class="model-category-title">External Models</div>
+          <div class="model-selector">
+            <button class="model-btn active" data-model="rfdetr">
+              RF-DETR
+              <span class="model-tag">Object Detection</span>
+            </button>
+            <button class="model-btn" data-model="places365">
+              Places365
+              <span class="model-tag">Scene Classification</span>
+            </button>
+          </div>
+        </div>
+        
+        <!-- Comprehensive -->
+        <div class="model-category">
+          <div class="model-category-title">Full Pipeline</div>
+          <div class="model-selector">
+            <button class="model-btn" data-model="comprehensive">
+              Comprehensive
+              <span class="model-tag">All Models Combined</span>
+            </button>
+          </div>
         </div>
       </div>
 
+      <!-- Upload Card -->
       <div class="card premium">
         <div class="card-header">
           <h2>Test Input</h2>
-          <p class="card-subtitle">Upload an image to test the selected model</p>
+          <p class="card-subtitle">Upload an image to analyze</p>
         </div>
+        
         <form id="test-form">
-          <label class="field premium">
-            <span class="label">Upload Test Image</span>
-            <input type="file" name="file" accept="image/*" required />
-          </label>
-          <div class="actions">
-            <button type="submit" class="btn-premium">Run Test</button>
+          <div class="upload-zone" id="upload-zone">
+            <div class="upload-zone-icon">_UPLOAD_ICON_</div>
+            <div class="upload-zone-text">Click or drag to upload an image</div>
+            <div class="upload-zone-hint">Supports JPG, PNG, WebP up to 10MB</div>
+            <input type="file" name="file" id="file-input" accept="image/*" required />
+          </div>
+          
+          <div class="preview-container" id="preview-container">
+            <img class="preview-image" id="preview-image" alt="Preview" />
+            <div class="preview-info">
+              <div>
+                <div class="preview-name" id="preview-name">image.jpg</div>
+                <div class="preview-size" id="preview-size">1.2 MB</div>
+              </div>
+              <button type="button" class="remove-preview" id="remove-preview">Remove</button>
+            </div>
+          </div>
+          
+          <div class="actions" style="margin-top: 20px;">
+            <button type="submit" class="btn-premium" id="run-test-btn">Run Test</button>
           </div>
         </form>
       </div>
 
-      <div class="test-results" id="results-container" style="display: none">
-        <div class="result-section">
-          <div class="card premium">
-            <div class="card-header">
-              <h3>Detection Results</h3>
-            </div>
-            <img class="result-image" id="detection-image" alt="Detection result" />
-          </div>
-        </div>
-        <div class="result-section">
-          <div class="card premium">
-            <div class="card-header">
-              <h3>Classification Results</h3>
-            </div>
-            <img class="result-image" id="classification-image" alt="Classification result" />
-          </div>
-        </div>
-      </div>
-
-      <div class="card premium" id="full-results-card" style="display: none">
+      <!-- Results Card -->
+      <div class="card premium" id="results-card" style="display: none;">
         <div class="card-header">
-          <h3>Full Analysis</h3>
+          <h2>Results</h2>
+          <span class="status-badge success" id="status-badge">Success</span>
         </div>
+        
         <div class="metrics-grid" id="metrics-grid"></div>
-        <div id="full-results-content"></div>
+        
+        <h4 style="margin-top: 20px; color: rgba(255,255,255,0.7); font-size: 0.9rem;">Detections</h4>
+        <div class="detection-list" id="detection-list"></div>
+        
+        <details class="raw-output">
+          <summary style="cursor: pointer; color: rgba(255,255,255,0.6); font-size: 0.85rem;">View Raw JSON</summary>
+          <pre id="raw-output"></pre>
+        </details>
       </div>
 
-      <div class="card premium" id="error-card" style="display: none">
+      <!-- Error Card -->
+      <div class="card premium" id="error-card" style="display: none;">
         <div class="card-header">
-          <h3>Error</h3>
+          <h2>Error</h2>
         </div>
-        <div class="error-message" id="error-message"></div>
+        <div class="error-container">
+          <div class="error-title" id="error-title">Error occurred</div>
+          <div class="error-message" id="error-message"></div>
+          <div class="stack-trace" id="stack-trace" style="display: none;"></div>
+        </div>
       </div>
     </div>
 
     <script>
-      // Model selection
+      // Elements
       const modelBtns = document.querySelectorAll('.model-btn');
-      let selectedModel = 'rfdetr';
+      const uploadZone = document.getElementById('upload-zone');
+      const fileInput = document.getElementById('file-input');
+      const previewContainer = document.getElementById('preview-container');
+      const previewImg = document.getElementById('preview-image');
+      const previewName = document.getElementById('preview-name');
+      const previewSize = document.getElementById('preview-size');
+      const removeBtn = document.getElementById('remove-preview');
+      const testForm = document.getElementById('test-form');
+      const resultsCard = document.getElementById('results-card');
+      const errorCard = document.getElementById('error-card');
+      const loadingOverlay = document.getElementById('loading-overlay');
+      const metricsGrid = document.getElementById('metrics-grid');
+      const detectionList = document.getElementById('detection-list');
+      const rawOutput = document.getElementById('raw-output');
+      const statusBadge = document.getElementById('status-badge');
+      const errorTitle = document.getElementById('error-title');
+      const errorMessage = document.getElementById('error-message');
+      const stackTrace = document.getElementById('stack-trace');
       
+      let selectedModel = 'rfdetr';
+      let selectedFile = null;
+      
+      // Model selection
       modelBtns.forEach(btn => {
         btn.addEventListener('click', () => {
           modelBtns.forEach(b => b.classList.remove('active'));
@@ -208,17 +616,76 @@
         });
       });
       
-      // Form submission
-      const testForm = document.getElementById('test-form');
-      const resultsContainer = document.getElementById('results-container');
-      const fullResultsCard = document.getElementById('full-results-card');
-      const errorCard = document.getElementById('error-card');
+      // Click to upload
+      uploadZone.addEventListener('click', () => {
+        fileInput.click();
+      });
       
+      // File selection
+      fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            previewImg.src = event.target.result;
+            previewContainer.classList.add('has-image');
+          };
+          reader.readAsDataURL(file);
+          selectedFile = file;
+          
+          previewName.textContent = file.name;
+          previewSize.textContent = formatFileSize(file.size);
+        }
+      });
+      
+      function formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      }
+      
+      // Drag and drop
+      uploadZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadZone.classList.add('dragover');
+      });
+      
+      uploadZone.addEventListener('dragleave', () => {
+        uploadZone.classList.remove('dragover');
+      });
+      
+      uploadZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadZone.classList.remove('dragover');
+        
+        const files = e.dataTransfer.files;
+        if (files.length > 0 && files[0].type.startsWith('image/')) {
+          fileInput.files = files;
+          fileInput.dispatchEvent(new Event('change'));
+        }
+      });
+      
+      // Remove preview
+      removeBtn.addEventListener('click', () => {
+        fileInput.value = '';
+        previewContainer.classList.remove('has-image');
+        selectedFile = null;
+      });
+      
+      // Form submission
       testForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         
-        const formData = new FormData(testForm);
+        if (!selectedFile) {
+          alert('Please select an image first');
+          return;
+        }
+        
+        const formData = new FormData();
+        formData.append('file', selectedFile);
         formData.append('model', selectedModel);
+        
+        loadingOverlay.classList.add('visible');
         
         try {
           const response = await fetch('/api/model-test', {
@@ -228,54 +695,79 @@
           
           const result = await response.json();
           
-          if (result.error) {
-            errorCard.style.display = 'block';
-            document.getElementById('error-message').textContent = result.error;
-            resultsContainer.style.display = 'none';
-            fullResultsCard.style.display = 'none';
-            return;
-          }
+          loadingOverlay.classList.remove('visible');
           
+          resultsCard.style.display = 'block';
           errorCard.style.display = 'none';
-          resultsContainer.style.display = 'grid';
-          fullResultsCard.style.display = 'block';
           
-          // Update images
-          if (result.detection_image) {
-            document.getElementById('detection-image').src = result.detection_image;
-          }
-          if (result.classification_image) {
-            document.getElementById('classification-image').src = result.classification_image;
+          if (result.success) {
+            statusBadge.className = 'status-badge success';
+            statusBadge.textContent = 'Success';
+          } else {
+            statusBadge.className = 'status-badge error';
+            statusBadge.textContent = 'Failed';
           }
           
-          // Update metrics
-          const metricsGrid = document.getElementById('metrics-grid');
-          metricsGrid.innerHTML = '';
-          
-          if (result.metrics) {
-            for (const [key, value] of Object.entries(result.metrics)) {
-              const metricItem = document.createElement('div');
-              metricItem.className = 'metric-item';
-              metricItem.innerHTML = `
-                <div class="metric-label">${key.replace(/_/g, ' ')}</div>
-                <div class="metric-value">${typeof value === 'number' ? value.toFixed(2) : value}</div>
-              `;
-              metricsGrid.appendChild(metricItem);
-            }
-          }
-          
-          // Update full results
-          const fullResultsContent = document.getElementById('full-results-content');
-          fullResultsContent.innerHTML = '<pre style="overflow-x: auto; font-size: 0.85rem;">' + 
-            JSON.stringify(result, null, 2) + '</pre>';
+          updateMetrics(result);
+          updateDetections(result);
+          rawOutput.textContent = JSON.stringify(result, null, 2);
           
         } catch (error) {
+          loadingOverlay.classList.remove('visible');
+          
           errorCard.style.display = 'block';
-          document.getElementById('error-message').textContent = 'Request failed: ' + error.message;
-          resultsContainer.style.display = 'none';
-          fullResultsCard.style.display = 'none';
+          resultsCard.style.display = 'none';
+          errorTitle.textContent = 'Request Failed';
+          errorMessage.textContent = error.message;
+          stackTrace.style.display = 'none';
         }
       });
+      
+      function updateMetrics(result) {
+        metricsGrid.innerHTML = '';
+        
+        const metrics = {
+          'Model': result.model || selectedModel,
+          'Success': result.success ? 'Yes' : 'No',
+          'Detections': result.count || result.detections?.length || 0,
+          'Scene': result.scene || '-',
+          'Confidence': result.confidence ? (result.confidence * 100).toFixed(1) + '%' : '-'
+        };
+        
+        for (const [key, value] of Object.entries(metrics)) {
+          if (value === '-' && !result[key.toLowerCase()]) continue;
+          
+          const item = document.createElement('div');
+          item.className = 'metric-item';
+          item.innerHTML = '<div class="metric-label">' + key + '</div>' +
+                          '<div class="metric-value">' + value + '</div>';
+          metricsGrid.appendChild(item);
+        }
+      }
+      
+      function updateDetections(result) {
+        detectionList.innerHTML = '';
+        
+        const detections = result.detections || [];
+        
+        if (detections.length === 0) {
+          detectionList.innerHTML = '<div style="text-align: center; color: rgba(255,255,255,0.5); padding: 20px;">No detections found</div>';
+          return;
+        }
+        
+        detections.forEach(det => {
+          const item = document.createElement('div');
+          item.className = 'detection-item';
+          
+          const label = det.class_name || det.label || det.name || 'Unknown';
+          const conf = det.confidence || det.score || 0;
+          const confClass = conf < 0.5 ? 'low' : conf < 0.7 ? 'medium' : '';
+          
+          item.innerHTML = '<span class="detection-label">' + label + '</span>' +
+                          '<span class="detection-confidence ' + confClass + '">' + (conf * 100).toFixed(1) + '%</span>';
+          detectionList.appendChild(item);
+        });
+      }
     </script>
   </body>
 </html>

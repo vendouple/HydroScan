@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>HydroScan - AI Water Quality Analysis</title>
     <link rel="stylesheet" href="/static/css/main.css" />
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
     <style>
       /* Premium page-specific styles */
       body {
@@ -14,8 +16,9 @@
       
       /* Hero premium styling */
       .hero.premium {
-        background: linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, rgba(0, 255, 136, 0.05) 100%);
-        border-bottom: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.08) 0%, rgba(0, 255, 136, 0.04) 100%);
+        border-bottom: 1px solid var(--glass-border, rgba(255, 255, 255, 0.08));
+        padding-bottom: 24px;
       }
       
       .hero.premium h1 {
@@ -27,290 +30,534 @@
       }
       
       .hero.premium .subtitle {
-        color: rgba(255, 255, 255, 0.7);
+        color: rgba(255, 255, 255, 0.65);
+        font-size: 1.05rem;
+        line-height: 1.7;
+      }
+      
+      /* Navigation pills */
+      .nav-pills {
+        display: flex;
+        justify-content: center;
+        gap: 12px;
+        margin-top: 20px;
+      }
+      
+      .nav-pills a {
+        color: rgba(255, 255, 255, 0.6);
+        text-decoration: none;
+        font-size: 0.9rem;
+        padding: 10px 20px;
+        border-radius: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        transition: all 0.3s ease;
+        background: rgba(255, 255, 255, 0.03);
+      }
+      
+      .nav-pills a:hover,
+      .nav-pills a.active {
+        color: var(--primary, #00d4ff);
+        background: rgba(0, 212, 255, 0.1);
+        border-color: rgba(0, 212, 255, 0.3);
+      }
+      
+      /* Card System Layout */
+      .card-grid {
+        display: grid;
+        gap: 24px;
+        padding: 0 16px;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+      
+      @media (min-width: 1024px) {
+        .card-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+        
+        .card-grid .card.full-width {
+          grid-column: 1 / -1;
+        }
+      }
+      
+      @media (min-width: 1440px) {
+        .card-grid {
+          grid-template-columns: 1fr 1fr 1fr;
+        }
       }
       
       /* Card premium styling */
       .card.premium {
-        background: var(--glass, rgba(255, 255, 255, 0.05));
-        border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 20px;
         backdrop-filter: blur(20px);
         -webkit-backdrop-filter: blur(20px);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        position: relative;
+        overflow: hidden;
+        padding: 24px;
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+      }
+      
+      .card.premium:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      }
+      
+      .card.premium::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.4), rgba(0, 255, 136, 0.4), transparent);
+      }
+      
+      .card.premium .card-header {
+        margin-bottom: 20px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
       }
       
       .card.premium .card-header h2 {
+        margin: 0;
+        background: linear-gradient(135deg, var(--primary, #00d4ff) 0%, rgba(0, 212, 255, 0.7) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        font-size: 1.25rem;
+        font-weight: 600;
+      }
+      
+      .card.premium .card-subtitle {
+        color: rgba(255, 255, 255, 0.55);
+        font-size: 0.9rem;
+        margin-top: 8px;
+      }
+      
+      /* Form elements premium */
+      .field.premium {
+        position: relative;
+        margin-bottom: 16px;
+      }
+      
+      .field.premium .label {
+        display: block;
+        color: rgba(255, 255, 255, 0.8);
+        font-weight: 500;
+        margin-bottom: 8px;
+        font-size: 0.9rem;
+      }
+      
+      .field.premium input,
+      .field.premium textarea {
+        width: 100%;
+        box-sizing: border-box;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 14px;
+        padding: 14px 18px;
+        color: var(--text);
+        font-size: 0.95rem;
+        font-family: inherit;
+        transition: all 0.3s ease;
+      }
+      
+      .field.premium input:focus,
+      .field.premium textarea:focus {
+        outline: none;
+        border-color: var(--primary, #00d4ff);
+        box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.12);
+        background: rgba(255, 255, 255, 0.06);
+      }
+      
+      .field.premium input::placeholder,
+      .field.premium textarea::placeholder {
+        color: rgba(255, 255, 255, 0.35);
+      }
+      
+      /* File upload premium */
+      .field.premium input[type="file"] {
+        cursor: pointer;
+        padding: 12px 16px;
+      }
+      
+      .field.premium input[type="file"]::file-selector-button {
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.15), rgba(0, 255, 136, 0.1));
+        border: 1px solid rgba(0, 212, 255, 0.3);
+        border-radius: 10px;
+        padding: 8px 16px;
         color: var(--primary, #00d4ff);
+        font-weight: 500;
+        cursor: pointer;
+        margin-right: 12px;
+        transition: all 0.2s ease;
+      }
+      
+      .field.premium input[type="file"]::file-selector-button:hover {
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.25), rgba(0, 255, 136, 0.15));
       }
       
       /* Location disabled styling */
       .location-disabled {
-        opacity: 0.5;
+        opacity: 0.45;
         pointer-events: none;
         filter: grayscale(0.5);
       }
       
       .location-disabled input,
       .location-disabled button {
-        background: rgba(128, 128, 128, 0.2) !important;
+        background: rgba(128, 128, 128, 0.15) !important;
         cursor: not-allowed !important;
       }
       
       .location-disabled label::after {
         content: " (Coming Soon)";
         font-size: 0.75em;
-        color: rgba(255, 255, 255, 0.5);
+        color: rgba(255, 255, 255, 0.4);
       }
       
-      /* Akinator Chat Widget */
-      .akinator-chat {
-        position: fixed;
-        bottom: 24px;
-        right: 24px;
-        width: 380px;
-        max-height: 500px;
-        background: var(--glass, rgba(255, 255, 255, 0.05));
-        border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
-        border-radius: 16px;
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-        z-index: 1000;
+      /* Grid layouts */
+      .grid.two {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: 1fr 1fr;
+      }
+      
+      @media (max-width: 640px) {
+        .grid.two {
+          grid-template-columns: 1fr;
+        }
+      }
+      
+      /* Checkbox premium */
+      .checkbox.premium {
         display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        transition: transform 0.3s ease, opacity 0.3s ease;
-      }
-      
-      .akinator-chat.collapsed {
-        transform: translateY(calc(100% - 56px));
-      }
-      
-      .akinator-chat.hidden {
-        transform: translateY(100%);
-        opacity: 0;
-        pointer-events: none;
-      }
-      
-      .akinator-header {
-        padding: 16px;
-        background: linear-gradient(135deg, var(--primary, #00d4ff) 0%, var(--accent-green, #00ff88) 100%);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        cursor: pointer;
-      }
-      
-      .akinator-header h3 {
-        margin: 0;
-        font-size: 1rem;
-        color: var(--dark, #0a0a0f);
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      
-      .akinator-header .toggle-btn {
-        background: rgba(0, 0, 0, 0.2);
-        border: none;
-        color: white;
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: background 0.2s;
-      }
-      
-      .akinator-header .toggle-btn:hover {
-        background: rgba(0, 0, 0, 0.3);
-      }
-      
-      .akinator-body {
-        flex: 1;
-        overflow-y: auto;
-        padding: 16px;
-        display: flex;
-        flex-direction: column;
+        align-items: flex-start;
         gap: 12px;
-        max-height: 400px;
-      }
-      
-      .akinator-question {
-        background: rgba(0, 212, 255, 0.1);
-        border: 1px solid rgba(0, 212, 255, 0.2);
+        padding: 12px 16px;
+        background: rgba(255, 255, 255, 0.03);
         border-radius: 12px;
-        padding: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        margin-bottom: 14px;
+        transition: all 0.2s ease;
       }
       
-      .akinator-question p {
-        margin: 0 0 12px 0;
-        color: rgba(255, 255, 255, 0.9);
-        font-size: 0.95rem;
-      }
-      
-      .akinator-options {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-      }
-      
-      .akinator-options button {
-        flex: 1;
-        min-width: 80px;
-        padding: 8px 16px;
-        border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.2));
-        border-radius: 8px;
+      .checkbox.premium:hover {
         background: rgba(255, 255, 255, 0.05);
-        color: white;
+        border-color: rgba(255, 255, 255, 0.1);
+      }
+      
+      .checkbox.premium input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--primary, #00d4ff);
         cursor: pointer;
-        transition: all 0.2s;
-        font-size: 0.85rem;
+        margin-top: 2px;
+        flex-shrink: 0;
       }
       
-      .akinator-options button:hover {
-        background: rgba(0, 212, 255, 0.2);
-        border-color: var(--primary, #00d4ff);
+      .checkbox.premium span {
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 0.9rem;
+        line-height: 1.5;
       }
       
-      .akinator-options button.selected {
-        background: var(--primary, #00d4ff);
+      /* Buttons premium */
+      .btn-premium {
+        background: linear-gradient(135deg, var(--primary, #00d4ff) 0%, var(--accent-green, #00ff88) 100%);
+        border: none;
+        border-radius: 14px;
+        padding: 14px 28px;
         color: var(--dark, #0a0a0f);
-        border-color: var(--primary, #00d4ff);
+        font-weight: 600;
+        font-size: 0.95rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 20px rgba(0, 212, 255, 0.25);
       }
       
-      .akinator-answer {
-        background: rgba(0, 255, 136, 0.1);
-        border: 1px solid rgba(0, 255, 136, 0.2);
-        border-radius: 12px;
-        padding: 10px 14px;
-        margin-left: auto;
-        max-width: 80%;
+      .btn-premium:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 30px rgba(0, 212, 255, 0.35);
       }
       
-      .akinator-answer p {
+      .btn-premium:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+      }
+      
+      .btn-secondary {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 14px;
+        padding: 14px 28px;
+        color: rgba(255, 255, 255, 0.8);
+        font-weight: 500;
+        font-size: 0.95rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+      
+      .btn-secondary:hover {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.25);
+      }
+      
+      .btn-danger {
+        background: rgba(248, 113, 113, 0.1);
+        border: 1px solid rgba(248, 113, 113, 0.3);
+        border-radius: 14px;
+        padding: 14px 28px;
+        color: var(--error, #f87171);
+        font-weight: 500;
+        font-size: 0.95rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+      
+      .btn-danger:hover {
+        background: rgba(248, 113, 113, 0.2);
+        border-color: rgba(248, 113, 113, 0.4);
+      }
+      
+      /* Actions row */
+      .actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-top: 20px;
+      }
+      
+      /* Disclaimer premium */
+      .disclaimer.premium {
+        margin-top: 24px;
+        padding: 16px 20px;
+        border-radius: 14px;
+        background: rgba(251, 191, 36, 0.08);
+        border: 1px solid rgba(251, 191, 36, 0.2);
+        font-size: 0.85rem;
+        color: rgba(255, 255, 255, 0.65);
+        line-height: 1.6;
+      }
+      
+      /* Timeline premium */
+      .timeline.premium {
+        list-style: none;
         margin: 0;
+        padding: 0;
+        position: relative;
+      }
+      
+      .timeline.premium::before {
+        content: '';
+        position: absolute;
+        left: 14px;
+        top: 8px;
+        bottom: 8px;
+        width: 2px;
+        background: linear-gradient(180deg, rgba(0, 212, 255, 0.3), rgba(0, 255, 136, 0.3));
+        border-radius: 1px;
+      }
+      
+      .timeline.premium .timeline-item {
+        position: relative;
+        padding-left: 48px;
+        margin-bottom: 16px;
+      }
+      
+      .timeline.premium .timeline-item:last-child {
+        margin-bottom: 0;
+      }
+      
+      .timeline.premium .timeline-item .marker {
+        position: absolute;
+        left: 6px;
+        top: 4px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: var(--dark, #0a0a0f);
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        transition: all 0.3s ease;
+      }
+      
+      .timeline.premium .timeline-item.in-progress .marker {
+        border-color: var(--primary, #00d4ff);
+        box-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+      
+      .timeline.premium .timeline-item.done .marker {
+        border-color: var(--accent-green, #00ff88);
+        background: var(--accent-green, #00ff88);
+        box-shadow: 0 0 12px rgba(0, 255, 136, 0.4);
+      }
+      
+      .timeline.premium .timeline-item.error .marker {
+        border-color: var(--error, #f87171);
+        box-shadow: 0 0 12px rgba(248, 113, 113, 0.4);
+      }
+      
+      .timeline.premium .timeline-item .content {
+        padding: 14px 18px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        transition: all 0.2s ease;
+      }
+      
+      .timeline.premium .timeline-item .content:hover {
+        background: rgba(255, 255, 255, 0.06);
+      }
+      
+      .timeline.premium .timeline-item .title {
+        margin: 0 0 4px;
+        font-weight: 500;
+        font-size: 0.95rem;
         color: rgba(255, 255, 255, 0.9);
-        font-size: 0.9rem;
       }
       
-      .akinator-result {
-        background: linear-gradient(135deg, rgba(0, 212, 255, 0.15) 0%, rgba(0, 255, 136, 0.15) 100%);
-        border: 1px solid rgba(0, 255, 136, 0.3);
+      .timeline.premium .timeline-item .detail {
+        margin: 0;
+        font-size: 0.85rem;
+        color: rgba(255, 255, 255, 0.55);
+        line-height: 1.5;
+      }
+      
+      @keyframes pulse {
+        0% { box-shadow: 0 0 12px rgba(0, 212, 255, 0.4); }
+        50% { box-shadow: 0 0 20px rgba(0, 212, 255, 0.6); }
+        100% { box-shadow: 0 0 12px rgba(0, 212, 255, 0.4); }
+      }
+      
+      /* Score blocks premium */
+      .score-grid.premium {
+        display: grid;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      
+      @media (min-width: 640px) {
+        .score-grid.premium {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      
+      .score-block.premium {
+        padding: 24px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.08) 0%, rgba(0, 255, 136, 0.05) 100%);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        text-align: center;
+      }
+      
+      .score-block.premium .label {
+        margin: 0;
+        font-size: 0.85rem;
+        color: rgba(255, 255, 255, 0.5);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      
+      .score-block.premium .score {
+        margin: 12px 0;
+        font-size: 3rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, var(--primary, #00d4ff) 0%, var(--accent-green, #00ff88) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      
+      /* Band premium */
+      .band.premium {
+        display: inline-flex;
+        align-items: center;
+        padding: 8px 16px;
+        border-radius: 24px;
+        font-size: 0.85rem;
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.15), rgba(0, 255, 136, 0.1));
+        border: 1px solid rgba(0, 212, 255, 0.25);
+        color: var(--primary, #00d4ff);
+      }
+      
+      /* Component bars premium */
+      .component.premium {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 14px 18px;
+        background: rgba(255, 255, 255, 0.03);
         border-radius: 12px;
-        padding: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        margin-bottom: 12px;
       }
       
-      .akinator-result h4 {
-        margin: 0 0 8px 0;
-        color: var(--accent-green, #00ff88);
-        font-size: 1rem;
-      }
-      
-      .akinator-result p {
-        margin: 0 0 8px 0;
-        color: rgba(255, 255, 255, 0.85);
+      .component.premium h4 {
+        margin: 0;
         font-size: 0.9rem;
+        display: flex;
+        justify-content: space-between;
+        color: rgba(255, 255, 255, 0.85);
       }
       
-      .akinator-result .confidence-bar {
+      .component.premium .bar {
+        position: relative;
         height: 8px;
-        background: rgba(255, 255, 255, 0.1);
         border-radius: 4px;
+        background: rgba(255, 255, 255, 0.08);
         overflow: hidden;
-        margin-top: 12px;
       }
       
-      .akinator-result .confidence-fill {
-        height: 100%;
-        background: linear-gradient(90deg, var(--primary, #00d4ff), var(--accent-green, #00ff88));
+      .component.premium .bar-fill {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
         border-radius: 4px;
+        background: linear-gradient(90deg, var(--primary, #00d4ff), var(--accent-green, #00ff88));
         transition: width 0.5s ease;
       }
       
-      .akinator-status {
-        text-align: center;
-        padding: 12px;
-        color: rgba(255, 255, 255, 0.6);
-        font-size: 0.85rem;
+      /* Secondary cards premium */
+      .secondary-card.premium {
+        padding: 20px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 0.9rem;
+        line-height: 1.6;
+        margin-bottom: 16px;
       }
       
-      .akinator-round {
-        font-size: 0.75rem;
-        color: rgba(255, 255, 255, 0.5);
-        text-align: center;
-        margin-top: 8px;
+      .secondary-card.premium h4 {
+        margin: 0 0 12px;
+        font-size: 0.95rem;
+        color: var(--primary, #00d4ff);
       }
       
-      .akinator-close {
-        position: absolute;
-        top: 8px;
-        right: 48px;
-        background: rgba(0, 0, 0, 0.2);
-        border: none;
-        color: white;
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        cursor: pointer;
-        font-size: 14px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      
-      .akinator-close:hover {
-        background: rgba(0, 0, 0, 0.4);
-      }
-      
-      /* Akinator toggle button (when chat is hidden) */
-      .akinator-toggle {
-        position: fixed;
-        bottom: 24px;
-        right: 24px;
-        width: 56px;
-        height: 56px;
-        border-radius: 50%;
-        background: linear-gradient(135deg, var(--primary, #00d4ff) 0%, var(--accent-green, #00ff88) 100%);
-        border: none;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 24px;
-        box-shadow: 0 4px 20px rgba(0, 212, 255, 0.4);
-        z-index: 999;
-        transition: transform 0.2s, box-shadow 0.2s;
-      }
-      
-      .akinator-toggle:hover {
-        transform: scale(1.1);
-        box-shadow: 0 6px 24px rgba(0, 212, 255, 0.5);
-      }
-      
-      .akinator-toggle.hidden {
-        display: none;
-      }
-      
-      /* History card premium redesign */
+      /* History card premium */
       .history-card.premium .history-list {
-        display: grid;
+        display: flex;
+        flex-direction: column;
         gap: 12px;
       }
       
       .history-card.premium .history-item {
         background: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 12px;
-        padding: 14px;
+        border-radius: 14px;
+        padding: 18px;
         cursor: pointer;
-        transition: all 0.2s;
+        transition: all 0.2s ease;
       }
       
       .history-card.premium .history-item:hover {
-        background: rgba(0, 212, 255, 0.08);
+        background: rgba(0, 212, 255, 0.06);
         border-color: rgba(0, 212, 255, 0.2);
       }
       
@@ -318,16 +565,11 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 8px;
-      }
-      
-      .history-card.premium .history-item-time {
-        font-size: 0.8rem;
-        color: rgba(255, 255, 255, 0.5);
+        margin-bottom: 10px;
       }
       
       .history-card.premium .history-item-score {
-        font-size: 1.1rem;
+        font-size: 1.3rem;
         font-weight: 600;
       }
       
@@ -337,28 +579,28 @@
       .history-card.premium .history-item-score.poor { color: #ff8800; }
       .history-card.premium .history-item-score.bad { color: #ff4444; }
       
-      .history-card.premium .history-item-preview {
-        font-size: 0.85rem;
-        color: rgba(255, 255, 255, 0.6);
+      .history-card.premium .history-item-meta {
         display: flex;
         gap: 16px;
+        font-size: 0.85rem;
+        color: rgba(255, 255, 255, 0.5);
       }
       
       .history-card.premium .history-item-actions {
         display: flex;
         gap: 8px;
-        margin-top: 10px;
+        margin-top: 14px;
       }
       
       .history-card.premium .history-item-actions button {
-        padding: 6px 12px;
-        font-size: 0.75rem;
-        border-radius: 6px;
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        padding: 8px 16px;
+        font-size: 0.8rem;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
         background: rgba(255, 255, 255, 0.05);
-        color: rgba(255, 255, 255, 0.8);
+        color: rgba(255, 255, 255, 0.7);
         cursor: pointer;
-        transition: all 0.2s;
+        transition: all 0.2s ease;
       }
       
       .history-card.premium .history-item-actions button:hover {
@@ -366,43 +608,162 @@
       }
       
       .history-card.premium .history-item-actions button.delete:hover {
-        background: rgba(255, 68, 68, 0.2);
-        border-color: rgba(255, 68, 68, 0.4);
-        color: #ff6666;
+        background: rgba(248, 113, 113, 0.15);
+        border-color: rgba(248, 113, 113, 0.3);
+        color: var(--error, #f87171);
       }
       
-      /* Akinator mode indicator */
-      .akinator-mode-badge {
+      /* AI Enhanced badge */
+      .ai-badge {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        padding: 4px 10px;
-        background: linear-gradient(135deg, rgba(0, 212, 255, 0.2) 0%, rgba(0, 255, 136, 0.2) 100%);
-        border: 1px solid rgba(0, 255, 136, 0.3);
+        padding: 4px 12px;
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.15), rgba(0, 255, 136, 0.1));
+        border: 1px solid rgba(0, 255, 136, 0.25);
         border-radius: 20px;
         font-size: 0.75rem;
         color: var(--accent-green, #00ff88);
-        margin-left: 8px;
+        margin-left: 10px;
+        font-weight: 500;
       }
       
-      .akinator-mode-badge::before {
-        content: "AI";
-        font-weight: 600;
+      /* Loading state */
+      #analyze-btn.loading {
+        position: relative;
+        color: transparent;
+      }
+      
+      #analyze-btn.loading::after {
+        content: '';
+        position: absolute;
+        width: 20px;
+        height: 20px;
+        top: 50%;
+        left: 50%;
+        margin: -10px 0 0 -10px;
+        border: 2px solid rgba(10, 10, 15, 0.3);
+        border-top-color: var(--dark, #0a0a0f);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      
+      /* Gallery grid premium */
+      .gallery-grid.premium {
+        display: grid;
+        gap: 16px;
+        margin-top: 16px;
+      }
+      
+      @media (min-width: 768px) {
+        .gallery-grid.premium {
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        }
+      }
+      
+      .gallery-card.premium {
+        border-radius: 14px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        transition: all 0.2s ease;
+      }
+      
+      .gallery-card.premium:hover {
+        border-color: rgba(0, 212, 255, 0.2);
+      }
+      
+      .gallery-card.premium img {
+        width: 100%;
+        height: 160px;
+        object-fit: cover;
+      }
+      
+      .gallery-card.premium .caption {
+        padding: 14px;
+        font-size: 0.85rem;
+        color: rgba(255, 255, 255, 0.6);
+      }
+      
+      .gallery-card.premium .caption strong {
+        color: rgba(255, 255, 255, 0.9);
+      }
+      
+      /* User analysis premium */
+      .user-analysis.premium {
+        margin-top: 24px;
+        padding: 24px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.06), rgba(0, 255, 136, 0.04));
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      
+      .user-analysis.premium h3 {
+        margin: 0 0 14px;
+        font-size: 1rem;
+        color: var(--primary, #00d4ff);
+      }
+      
+      .user-analysis.premium .conclusion {
+        margin: 0 0 14px;
+        font-size: 0.95rem;
+        color: rgba(255, 255, 255, 0.85);
+        line-height: 1.6;
+      }
+      
+      .user-analysis.premium .rationale {
+        margin: 0;
+        font-size: 0.9rem;
+        color: rgba(255, 255, 255, 0.6);
+        line-height: 1.5;
+      }
+      
+      /* External link card */
+      .external.premium {
+        padding: 20px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, rgba(13, 148, 136, 0.1), rgba(0, 212, 255, 0.05));
+        border: 1px solid rgba(13, 148, 136, 0.25);
+        font-size: 0.9rem;
+        line-height: 1.6;
+      }
+      
+      .external.premium strong {
+        color: var(--accent-green, #00ff88);
+      }
+      
+      /* Hidden utility */
+      .hidden {
+        display: none !important;
+      }
+      
+      /* Responsive */
+      @media (max-width: 640px) {
+        .hero.premium {
+          padding: 32px 16px 20px;
+        }
+        
+        .nav-pills {
+          flex-wrap: wrap;
+        }
+        
+        .score-block.premium .score {
+          font-size: 2.4rem;
+        }
+        
+        .card.premium {
+          padding: 18px;
+        }
       }
     </style>
   </head>
   <body>
     <!-- Particle Background -->
-    <div class="particles-background" aria-hidden="true">
-      <div class="particle particle-1"></div>
-      <div class="particle particle-2"></div>
-      <div class="particle particle-3"></div>
-      <div class="particle particle-4"></div>
-      <div class="particle particle-5"></div>
-      <div class="particle particle-6"></div>
-      <div class="particle particle-7"></div>
-      <div class="particle particle-8"></div>
-    </div>
+    <div class="particles-background" aria-hidden="true"></div>
     
     <header class="hero premium">
       <a href="/" style="text-decoration: none; color: inherit;">
@@ -412,27 +773,24 @@
         AI-powered water quality analysis using computer vision. 
         Upload photos or videos of water sources for instant safety insights.
       </p>
-      <div style="margin-top: 16px">
-        <a href="/model-lab" class="btn ghost" style="text-decoration: none">
-          Model Lab
-        </a>
-        <a href="/" class="btn ghost" style="text-decoration: none; margin-left: 8px;">
-          Home
-        </a>
+      <div class="nav-pills">
+        <a href="/" class="active">Home</a>
+        <a href="/model-lab">Model Lab</a>
       </div>
     </header>
 
-    <main id="layout">
-      <section class="card input-card premium">
+    <main id="layout" class="card-grid">
+      <!-- Upload Section - Full width on large screens -->
+      <section class="card input-card premium full-width">
         <div class="card-header">
-          <h2>Upload Media <span class="akinator-mode-badge">Akinator Mode</span></h2>
+          <h2>Upload Media <span class="ai-badge">AI Enhanced</span></h2>
           <p class="card-subtitle">
             Capture water samples with your camera. Upload up to 25 images or 5 short videos.
             Add observations like smell, color, and temperature for better analysis.
           </p>
         </div>
         <form id="analyze-form" autocomplete="off">
-          <label class="field">
+          <label class="field premium">
             <span class="label">Photos & Videos</span>
             <input
               type="file"
@@ -443,7 +801,7 @@
               required />
           </label>
 
-          <label class="field">
+          <label class="field premium">
             <span class="label">Your Observations (Optional)</span>
             <textarea
               id="description"
@@ -453,166 +811,160 @@
           </label>
 
           <div class="grid two location-disabled">
-            <label class="field">
+            <label class="field premium">
               <span class="label">Latitude</span>
               <input type="number" id="lat" name="lat" step="any" placeholder="e.g. -6.2088" disabled />
             </label>
-            <label class="field">
+            <label class="field premium">
               <span class="label">Longitude</span>
               <input type="number" id="lon" name="lon" step="any" placeholder="e.g. 106.8456" disabled />
             </label>
           </div>
 
-          <div class="location-row location-disabled">
-            <button type="button" class="ghost" id="locate-btn" disabled>
+          <div class="location-row location-disabled" style="margin-bottom: 20px;">
+            <button type="button" class="btn-secondary" id="locate-btn" disabled>
               Use My Current Location
             </button>
-            <span class="location-status" id="location-status"
-              >Location features coming soon</span
-            >
+            <span class="location-status" id="location-status" style="margin-left: 12px; font-size: 0.85rem; color: rgba(255,255,255,0.4);">
+              Location features coming soon
+            </span>
           </div>
 
-          <label class="checkbox">
+          <label class="checkbox premium">
             <input type="checkbox" id="debug" name="debug" />
-            <span
-              >Enable debug artifacts (saves annotated frames & detailed
-              logs)</span
-            >
+            <span>Enable debug artifacts (saves annotated frames & detailed logs)</span>
           </label>
 
-          <label class="checkbox">
+          <label class="checkbox premium">
             <input type="checkbox" id="dont-save" name="dont_save" />
-            <span>
-              Don't save this analysis to history (debug snapshots disabled)
-            </span>
+            <span>Don't save this analysis to history (debug snapshots disabled)</span>
           </label>
 
           <div class="actions">
-            <button type="submit" id="analyze-btn">Analyze Water</button>
-            <button type="reset" id="reset-btn">Clear</button>
+            <button type="submit" id="analyze-btn" class="btn-premium">Analyze Water</button>
+            <button type="reset" id="reset-btn" class="btn-secondary">Clear</button>
           </div>
         </form>
 
-        <div class="disclaimer">
+        <div class="disclaimer premium">
           HydroScan is for informational purposes only. Always consult local authorities 
           or conduct laboratory testing for official water safety assessments.
         </div>
       </section>
 
-      <section class="card timeline-card premium" id="timeline-card">
+      <!-- Timeline Section -->
+      <section class="card timeline-card premium full-width hidden" id="timeline-card">
         <div class="card-header">
           <h2>Analysis Progress</h2>
-          <span class="analysis-id" id="analysis-id">No analysis yet</span>
+          <p class="card-subtitle">Track the analysis pipeline in real-time</p>
         </div>
-        <ul class="timeline" id="timeline">
-          <li class="timeline-item idle">
-            <div class="marker"></div>
+        <ol class="timeline premium" id="timeline">
+          <li class="timeline-item idle" data-step="extract">
+            <span class="marker"></span>
             <div class="content">
-              <p class="title">Ready to analyze</p>
-              <p class="detail">Upload media above and click "Analyze Water" to begin.</p>
+              <p class="title">Extracting Frames</p>
+              <p class="detail">Waiting...</p>
             </div>
           </li>
-        </ul>
+          <li class="timeline-item idle" data-step="classify">
+            <span class="marker"></span>
+            <div class="content">
+              <p class="title">Classifying Scenes</p>
+              <p class="detail">Waiting...</p>
+            </div>
+          </li>
+          <li class="timeline-item idle" data-step="detect">
+            <span class="marker"></span>
+            <div class="content">
+              <p class="title">Detecting Objects</p>
+              <p class="detail">Waiting...</p>
+            </div>
+          </li>
+          <li class="timeline-item idle" data-step="aggregate">
+            <span class="marker"></span>
+            <div class="content">
+              <p class="title">Aggregating Results</p>
+              <p class="detail">Waiting...</p>
+            </div>
+          </li>
+          <li class="timeline-item idle" data-step="score">
+            <span class="marker"></span>
+            <div class="content">
+              <p class="title">Scoring Water Quality</p>
+              <p class="detail">Waiting...</p>
+            </div>
+          </li>
+        </ol>
       </section>
 
-      <section class="card history-card premium" id="history-card">
-        <div class="card-header">
-          <h2>Recent Analyses</h2>
-          <button type="button" class="ghost" id="refresh-history">
-            Refresh
-          </button>
-        </div>
-        <p class="history-empty" id="history-empty">
-          No analyses yet. Your saved results will appear here.
-        </p>
-        <ul class="history-list" id="history-list"></ul>
-      </section>
-
-      <section class="card results-card hidden premium" id="results-card">
+      <!-- Results Section -->
+      <section class="card results-card premium full-width hidden" id="results-card">
         <div class="card-header">
           <h2>Analysis Results</h2>
-          <span class="result-timestamp" id="result-timestamp"></span>
+          <p class="card-subtitle" id="result-timestamp"></p>
         </div>
-        <div class="score-grid">
-          <div class="score-block">
-            <p class="label">Potability Score</p>
-            <p class="score" id="potability-score">--</p>
-            <div class="band" id="band-label">Band: --</div>
+
+        <div class="score-grid premium">
+          <div class="score-block premium">
+            <p class="label">Water Quality Score</p>
+            <p class="score" id="final-score">--</p>
+            <span class="band premium" id="quality-band">Calculating...</span>
           </div>
-          <div class="score-block">
-            <p class="label">Confidence Level</p>
+          <div class="score-block premium">
+            <p class="label">Confidence</p>
             <p class="score" id="confidence-score">--</p>
-            <div class="confidence-pill" id="confidence-band">--</div>
+            <span class="band premium" id="confidence-band">--</span>
           </div>
         </div>
 
-        <div class="components" id="component-breakdown"></div>
+        <div class="components" id="score-components">
+          <p class="component-title" style="margin: 16px 0 8px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(255,255,255,0.4);">Score Components</p>
+        </div>
 
-        <div class="secondary-grid" id="secondary-metrics"></div>
+        <div class="secondary-grid" id="secondary-info">
+          <!-- Dynamic content -->
+        </div>
 
-        <div class="external" id="external-data"></div>
+        <div class="user-analysis premium hidden" id="user-analysis">
+          <h3>User Analysis</h3>
+          <p class="conclusion" id="user-conclusion"></p>
+          <p class="rationale" id="user-rationale"></p>
+        </div>
 
-        <div class="user-analysis hidden" id="user-analysis">
-          <h3>User input assessment</h3>
-          <p class="conclusion" id="user-analysis-conclusion">
-            No conclusion generated.
-          </p>
-          <div class="user-analysis-meta">
-            <span class="badge" id="user-analysis-score">--</span>
-            <span class="badge" id="user-analysis-confidence">--</span>
-            <span class="badge muted hidden" id="user-analysis-model"></span>
-          </div>
-          <p class="rationale hidden" id="user-analysis-rationale"></p>
+        <div class="external premium" id="external-links" style="margin-top: 20px;">
+          <strong>Learn more:</strong>
+          <span id="external-content"></span>
         </div>
       </section>
 
-      <section class="card debug-card hidden premium" id="debug-card">
+      <!-- Debug Section -->
+      <section class="card debug-card premium full-width hidden" id="debug-card">
         <div class="card-header">
-          <h2>Debug console</h2>
-          <div class="debug-actions">
-            <a id="download-debug" class="ghost" href="#" download
-              >Download debug JSON</a
-            >
-            <a
-              id="open-result-json"
-              class="ghost"
-              href="#"
-              target="_blank"
-              rel="noopener"
-              >Open result JSON</a
-            >
-          </div>
+          <h2>Debug Information</h2>
+          <p class="card-subtitle">Detailed analysis artifacts</p>
         </div>
-        <pre class="debug-log" id="debug-log">Debug not enabled.</pre>
+        <div class="debug-actions" style="display: flex; gap: 12px; flex-wrap: wrap;">
+          <button class="btn-secondary" id="download-log">Download Log</button>
+          <button class="btn-secondary" id="view-snapshots">View Snapshots</button>
+        </div>
+        <pre class="debug-log" id="debug-log" style="margin-top: 16px; overflow-x: auto; font-size: 0.8rem;"></pre>
+        <div class="gallery-grid premium" id="debug-gallery"></div>
+      </section>
 
-        <div class="debug-snapshots" id="debug-snapshots">
-          <h3>Detection snapshots</h3>
-          <p class="empty" id="debug-snapshots-empty">
-            No detection snapshots generated yet.
+      <!-- History Section -->
+      <section class="card history-card premium full-width">
+        <div class="card-header">
+          <h2>Recent Analyses</h2>
+          <p class="card-subtitle">Your analysis history</p>
+        </div>
+        <div class="history-list" id="history-list">
+          <p class="history-empty" style="color: rgba(255,255,255,0.4); text-align: center; padding: 24px;">
+            No analysis history yet. Upload media to get started.
           </p>
-          <div class="snapshot-groups" id="snapshot-groups"></div>
         </div>
       </section>
     </main>
 
-    <!-- Akinator Chat Widget -->
-    <div class="akinator-chat hidden" id="akinator-chat">
-      <div class="akinator-header" id="akinator-header">
-        <h3>AI Water Analyst</h3>
-        <button class="toggle-btn" id="akinator-toggle-btn">v</button>
-      </div>
-      <div class="akinator-body" id="akinator-body">
-        <div class="akinator-status" id="akinator-status">
-          Start an analysis to begin AI questioning
-        </div>
-      </div>
-    </div>
-    
-    <!-- Akinator Toggle Button (shown when chat is hidden) -->
-    <button class="akinator-toggle" id="akinator-float-btn" title="Open AI Analyst">
-      <span>AI</span>
-    </button>
-
-    <script src="/static/js/ui.js" type="module"></script>
+    <script src="/static/js/ui.js"></script>
   </body>
 </html>

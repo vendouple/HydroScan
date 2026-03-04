@@ -4,47 +4,45 @@ Akinator-style water quality inference API endpoints.
 This module provides interactive back-and-forth questioning to determine
 water quality, similar to the Akinator game. The AI asks questions and
 narrows down the water quality assessment based on user answers.
+
+Uses Gemini 3 Flash via OpenAI-compatible API for inference.
 """
 
 from __future__ import annotations
 
 import uuid
-import asyncio
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-# Import the QwenAdapter for local LLM inference
+# Import the GeminiAdapter (named QwenAdapter for backward compatibility)
 from WebInterface.backend.Adapters.QwenAdapter import (
-    QwenAdapter,
+    GeminiAdapter,
     AkinatorState,
     Question,
     InferenceResult,
+    get_qwen_adapter,
+    close_qwen_adapter,
 )
 
 router = APIRouter(prefix="/api/akinator", tags=["akinator"])
 
 # In-memory session storage (for production, use Redis or database)
 _sessions: Dict[str, AkinatorState] = {}
-_adapter: Optional[QwenAdapter] = None
-
-
-def get_adapter() -> QwenAdapter:
-    """Get or create the QwenAdapter singleton."""
-    global _adapter
-    if _adapter is None:
-        _adapter = QwenAdapter()
-    return _adapter
 
 
 class StartSessionRequest(BaseModel):
     """Request to start a new Akinator session."""
-    initial_context: Optional[Dict[str, Any]] = Field(
+    detection_context: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="Initial context from visual analysis (scores, detections, etc.)"
+        description="Detection context from visual analysis (detection_rate, water_found, objects, etc.)"
+    )
+    user_description: Optional[str] = Field(
+        default=None,
+        description="User's text description of the water/image"
     )
     analysis_id: Optional[str] = Field(
         default=None,
@@ -55,8 +53,12 @@ class StartSessionRequest(BaseModel):
 class AnswerRequest(BaseModel):
     """Request to submit an answer to the current question."""
     session_id: str = Field(..., description="The session ID")
-    question_id: str = Field(..., description="The question ID being answered")
-    answer: str = Field(..., description="The user's answer (yes/no/unsure or text)")
+    answer: str = Field(..., description="The user's answer (short sentence or phrase)")
+
+
+class CancelRequest(BaseModel):
+    """Request to cancel the session early and get results."""
+    session_id: str = Field(..., description="The session ID")
 
 
 class SessionResponse(BaseModel):
@@ -66,17 +68,9 @@ class SessionResponse(BaseModel):
     max_rounds: int
     question: Optional[Dict[str, Any]] = None
     inference: Optional[Dict[str, Any]] = None
-    status: str  # "questioning", "confident", "max_rounds", "error"
+    status: str  # "questioning", "cancelled", "confident", "max_rounds", "error"
     message: Optional[str] = None
-
-
-class InferenceResponse(BaseModel):
-    """Response containing the final inference result."""
-    session_id: str
-    inference: Dict[str, Any]
-    confidence: float
-    rounds_used: int
-    status: str
+    warning: Optional[str] = None
 
 
 @router.post("/start", response_model=SessionResponse)
@@ -84,19 +78,18 @@ async def start_session(request: StartSessionRequest) -> SessionResponse:
     """
     Start a new Akinator session.
     
-    This initializes a new questioning session. If initial_context is provided
+    This initializes a new questioning session. If detection_context is provided
     (from visual analysis), the AI will use that to inform its questions.
+    The user_description is also used to help guide the questioning.
     """
     session_id = str(uuid.uuid4())
-    adapter = get_adapter()
+    adapter = await get_qwen_adapter()
     
     # Create initial state
     state = AkinatorState(
         session_id=session_id,
-        analysis_id=request.analysis_id,
-        visual_context=request.initial_context or {},
-        answers=[],
-        confidence_history=[],
+        detection_context=request.detection_context or {},
+        user_description=request.user_description,
     )
     
     # Store session
@@ -104,24 +97,30 @@ async def start_session(request: StartSessionRequest) -> SessionResponse:
     
     try:
         # Generate first question
-        question = await adapter.generate_question(state, request.initial_context)
+        question = await adapter.generate_question(
+            session_id=session_id,
+            detection_context=request.detection_context or {},
+            user_description=request.user_description,
+        )
         
         if question is None:
             # Model unavailable, use fallback
-            state.current_question = adapter.get_fallback_question(0)
-        else:
-            state.current_question = question
+            state.question_count = 0
+            question = Question(
+                question_id=str(uuid.uuid4()),
+                question_text="Can you describe what you see in the image related to water?",
+                round_number=1,
+            )
         
         return SessionResponse(
             session_id=session_id,
-            round_number=1,
-            max_rounds=10,
+            round_number=question.round_number,
+            max_rounds=state.max_questions,
             question={
-                "id": state.current_question.id,
-                "text": state.current_question.text,
-                "type": state.current_question.question_type,
-                "options": state.current_question.options,
-            } if state.current_question else None,
+                "id": question.question_id,
+                "text": question.question_text,
+                "round": question.round_number,
+            },
             inference=None,
             status="questioning",
             message="Session started. Answer the question to continue.",
@@ -141,20 +140,21 @@ async def submit_answer(request: AnswerRequest) -> SessionResponse:
     The AI will process the answer and either:
     1. Ask another question (if not confident yet)
     2. Return an inference (if confident or max rounds reached)
+    
+    Answers can be short sentences or phrases - not just yes/no/maybe.
     """
     state = _sessions.get(request.session_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    if state.current_question is None or state.current_question.id != request.question_id:
-        raise HTTPException(status_code=400, detail="Invalid question ID for this session")
-    
-    adapter = get_adapter()
+    adapter = await get_qwen_adapter()
     
     try:
         # Process the answer
         next_question, inference = await adapter.process_answer(
-            state, request.answer, request.question_id
+            session_id=request.session_id,
+            state=state,
+            answer=request.answer,
         )
         
         # Check if we have an inference
@@ -162,56 +162,57 @@ async def submit_answer(request: AnswerRequest) -> SessionResponse:
             # Session complete - return inference
             _sessions.pop(request.session_id, None)  # Clean up
             
+            status = "confident" if inference.confidence >= 0.85 else "max_rounds"
+            if state.cancelled:
+                status = "cancelled"
+            
             return SessionResponse(
                 session_id=request.session_id,
-                round_number=state.round_number,
-                max_rounds=10,
+                round_number=inference.question_count,
+                max_rounds=state.max_questions,
                 question=None,
                 inference={
-                    "water_quality": inference.water_quality,
+                    "label": inference.predicted_label,
                     "confidence": inference.confidence,
+                    "confidence_level": inference.confidence_level.value,
                     "reasoning": inference.reasoning,
-                    "recommendations": inference.recommendations,
-                    "contaminants": inference.contaminants,
+                    "detection_data": inference.detection_data,
                 },
-                status="confident" if inference.confidence >= 0.85 else "max_rounds",
+                status=status,
                 message="Analysis complete! Here's my assessment.",
+                warning="Results may be less accurate due to early cancellation." if state.cancelled else None,
             )
         
         # Need more questions
         if next_question is not None:
-            state.current_question = next_question
-            
             return SessionResponse(
                 session_id=request.session_id,
-                round_number=state.round_number,
-                max_rounds=10,
+                round_number=next_question.round_number,
+                max_rounds=state.max_questions,
                 question={
-                    "id": next_question.id,
-                    "text": next_question.text,
-                    "type": next_question.question_type,
-                    "options": next_question.options,
+                    "id": next_question.question_id,
+                    "text": next_question.question_text,
+                    "round": next_question.round_number,
                 },
                 inference=None,
                 status="questioning",
-                message=f"Round {state.round_number} of 10",
+                message=f"Round {next_question.round_number} of {state.max_questions}",
             )
         
         # No more questions but no inference - use fallback
-        # This shouldn't happen normally, but handle gracefully
         _sessions.pop(request.session_id, None)
         
         return SessionResponse(
             session_id=request.session_id,
-            round_number=state.round_number,
-            max_rounds=10,
+            round_number=state.question_count,
+            max_rounds=state.max_questions,
             question=None,
             inference={
-                "water_quality": "Unknown",
+                "label": "Unknown",
                 "confidence": 0.0,
+                "confidence_level": "low",
                 "reasoning": "Unable to determine water quality from the provided answers.",
-                "recommendations": ["Consider re-analyzing with clearer answers."],
-                "contaminants": [],
+                "detection_data": state.detection_context,
             },
             status="error",
             message="Could not determine water quality.",
@@ -221,6 +222,52 @@ async def submit_answer(request: AnswerRequest) -> SessionResponse:
         raise HTTPException(status_code=500, detail=f"Failed to process answer: {str(e)}")
 
 
+@router.post("/cancel", response_model=SessionResponse)
+async def cancel_session(request: CancelRequest) -> SessionResponse:
+    """
+    Cancel the session early and get immediate results with a warning.
+    
+    This allows users to end the questioning before all rounds are complete.
+    Results will be marked as potentially less accurate.
+    """
+    state = _sessions.get(request.session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Mark as cancelled
+    state.cancelled = True
+    
+    adapter = await get_qwen_adapter()
+    
+    try:
+        # Force a final prediction
+        inference = await adapter._make_final_prediction(state)
+        
+        # Clean up session
+        _sessions.pop(request.session_id, None)
+        
+        return SessionResponse(
+            session_id=request.session_id,
+            round_number=inference.question_count,
+            max_rounds=state.max_questions,
+            question=None,
+            inference={
+                "label": inference.predicted_label,
+                "confidence": inference.confidence,
+                "confidence_level": inference.confidence_level.value,
+                "reasoning": inference.reasoning,
+                "detection_data": inference.detection_data,
+            },
+            status="cancelled",
+            message="Session cancelled. Results provided based on limited questioning.",
+            warning="WARNING: Results may be less accurate due to early cancellation. For best results, complete all questioning rounds.",
+        )
+        
+    except Exception as e:
+        _sessions.pop(request.session_id, None)
+        raise HTTPException(status_code=500, detail=f"Failed to cancel session: {str(e)}")
+
+
 @router.get("/session/{session_id}", response_model=SessionResponse)
 async def get_session(session_id: str) -> SessionResponse:
     """Get the current state of an Akinator session."""
@@ -228,25 +275,21 @@ async def get_session(session_id: str) -> SessionResponse:
     if state is None:
         raise HTTPException(status_code=404, detail="Session not found")
     
+    # Build response - we don't store the current question in state anymore
     return SessionResponse(
         session_id=session_id,
-        round_number=state.round_number,
-        max_rounds=10,
-        question={
-            "id": state.current_question.id,
-            "text": state.current_question.text,
-            "type": state.current_question.question_type,
-            "options": state.current_question.options,
-        } if state.current_question else None,
+        round_number=state.question_count,
+        max_rounds=state.max_questions,
+        question=None,  # Question is generated on-demand
         inference=None,
         status="questioning",
-        message=f"Session in progress. Round {state.round_number} of 10.",
+        message=f"Session in progress. Round {state.question_count} of {state.max_questions} completed.",
     )
 
 
 @router.delete("/session/{session_id}")
 async def end_session(session_id: str) -> JSONResponse:
-    """End and clean up an Akinator session."""
+    """End and clean up an Akinator session without getting results."""
     if session_id in _sessions:
         del _sessions[session_id]
         return JSONResponse({"message": "Session ended successfully"})
@@ -256,19 +299,18 @@ async def end_session(session_id: str) -> JSONResponse:
 @router.get("/health")
 async def health_check() -> Dict[str, Any]:
     """Check the health status of the Akinator system."""
-    adapter = get_adapter()
+    adapter = await get_qwen_adapter()
     
     return {
         "status": "healthy",
-        "model_available": adapter.is_available(),
-        "device": adapter.device if hasattr(adapter, 'device') else "unknown",
+        "model": "gemini-3-flash-preview",
+        "api_endpoint": "helixmind.online/v1",
+        "adapter_initialized": adapter._initialized,
         "active_sessions": len(_sessions),
     }
 
 
-# Cleanup task for expired sessions (optional, for production)
-async def cleanup_expired_sessions(max_age_minutes: int = 30):
-    """Remove sessions that have been inactive for too long."""
-    # This would be called periodically by a background task
-    # For now, sessions are cleaned up when they complete
-    pass
+@router.on_event("shutdown")
+async def shutdown_event():
+    """Clean up adapter on shutdown."""
+    await close_qwen_adapter()
