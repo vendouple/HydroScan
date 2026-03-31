@@ -6,12 +6,31 @@
     <title>HydroScan - AI Water Quality Analysis</title>
     <link rel="stylesheet" href="/static/css/main.css" />
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <style>
       /* Premium page-specific styles */
       body {
-        background: var(--dark, #0a0a0f);
+        margin: 0;
         min-height: 100vh;
+        font-family: 'Inter', sans-serif;
+        color: #e0f2fe;
+        background-color: #03080c;
+      }
+      
+      .particles-background {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        z-index: -1;
+        background: 
+          radial-gradient(circle at 20% 30%, rgba(0, 212, 255, 0.06), transparent 40%),
+          radial-gradient(circle at 80% 70%, rgba(0, 255, 136, 0.04), transparent 40%);
+        /* Noise texture */
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+        pointer-events: none;
+      }
+
+      h1, h2, h3, h4, h5, h6, .outfit-font {
+        font-family: 'Outfit', sans-serif;
       }
       
       /* Hero premium styling */
@@ -759,6 +778,241 @@
           padding: 18px;
         }
       }
+
+      /* Akinator Glassmorphic Floating Chat */
+      #akinator-chat {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        width: 380px;
+        max-width: calc(100vw - 48px);
+        background: rgba(10, 20, 30, 0.7);
+        backdrop-filter: blur(24px);
+        -webkit-backdrop-filter: blur(24px);
+        border: 1px solid rgba(0, 212, 255, 0.3);
+        border-radius: 24px;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05) inset, 0 0 20px rgba(0, 212, 255, 0.15);
+        display: flex;
+        flex-direction: column;
+        z-index: 1000;
+        transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        overflow: hidden;
+        clip-path: inset(0 round 24px);
+      }
+      #akinator-chat.hidden {
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(20px) scale(0.95);
+      }
+      #akinator-chat.collapsed {
+        height: 64px;
+      }
+      #akinator-chat:not(.collapsed) {
+        height: 550px;
+        max-height: calc(100vh - 48px);
+      }
+      #akinator-header {
+        padding: 18px 24px;
+        background: linear-gradient(90deg, rgba(0, 212, 255, 0.1), rgba(0, 255, 136, 0.1));
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
+        user-select: none;
+        font-family: 'Inter', sans-serif;
+        position: relative;
+      }
+      #akinator-header::after {
+        content: '';
+        position: absolute;
+        top: 0; left: 0; right: 0; height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(0,212,255,0.6), transparent);
+      }
+      .akinator-title {
+        margin: 0;
+        font-size: 1.1rem;
+        font-weight: 600;
+        background: linear-gradient(135deg, #00d4ff, #00ff88);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .akinator-title::before {
+        content: '✦';
+        font-size: 1.2rem;
+        color: #00d4ff;
+        -webkit-text-fill-color: initial;
+        animation: pulse-glow 2s infinite;
+      }
+      #akinator-toggle-btn {
+        background: rgba(255,255,255,0.1);
+        border: none;
+        color: white;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-weight: bold;
+      }
+      #akinator-toggle-btn:hover {
+        background: rgba(255,255,255,0.2);
+        transform: scale(1.1);
+      }
+      #akinator-body {
+        padding: 20px;
+        overflow-y: auto;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        scroll-behavior: smooth;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(0, 212, 255, 0.3) transparent;
+      }
+      #akinator-body::-webkit-scrollbar {
+        width: 6px;
+      }
+      #akinator-body::-webkit-scrollbar-thumb {
+        background: rgba(0, 212, 255, 0.3);
+        border-radius: 10px;
+      }
+      .akinator-question {
+        background: rgba(0, 212, 255, 0.08);
+        border: 1px solid rgba(0, 212, 255, 0.2);
+        border-radius: 20px 20px 20px 4px;
+        padding: 16px;
+        color: #e0f2fe;
+        font-size: 0.95rem;
+        line-height: 1.5;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        animation: slideInLeft 0.3s ease-out;
+      }
+      .akinator-round {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: rgba(0, 212, 255, 0.7);
+        margin-bottom: 8px;
+        font-weight: 600;
+      }
+      .akinator-options {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .akinator-options button {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: white;
+        padding: 10px 16px;
+        border-radius: 12px;
+        cursor: pointer;
+        text-align: left;
+        transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+        font-family: inherit;
+        font-size: 0.9rem;
+      }
+      .akinator-options button:hover:not(:disabled) {
+        background: rgba(0, 212, 255, 0.15);
+        border-color: rgba(0, 212, 255, 0.4);
+        transform: translateX(4px);
+      }
+      .akinator-options button.selected {
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.2), rgba(0, 255, 136, 0.2));
+        border-color: rgba(0, 255, 136, 0.5);
+        transform: translateX(0);
+      }
+      .akinator-options button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .akinator-answer {
+        align-self: flex-end;
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.2), rgba(0, 150, 255, 0.2));
+        border: 1px solid rgba(0, 212, 255, 0.3);
+        border-radius: 20px 20px 4px 20px;
+        padding: 12px 18px;
+        color: white;
+        font-size: 0.95rem;
+        max-width: 85%;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        animation: slideInRight 0.3s ease-out;
+      }
+      .akinator-status {
+        align-self: center;
+        font-size: 0.8rem;
+        color: rgba(255, 255, 255, 0.5);
+        font-style: italic;
+        margin: 8px 0;
+        animation: fadeIn 0.4s ease-out;
+      }
+      .akinator-result {
+        background: linear-gradient(135deg, rgba(0, 255, 136, 0.1), rgba(0, 212, 255, 0.1));
+        border: 1px solid rgba(0, 255, 136, 0.3);
+        border-radius: 16px;
+        padding: 20px;
+        margin-top: 10px;
+        animation: zoomIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      }
+      .akinator-result h4 {
+        margin: 0 0 12px 0;
+        color: #00ff88;
+        font-size: 1.1rem;
+      }
+      .confidence-bar {
+        height: 6px;
+        background: rgba(255,255,255,0.1);
+        border-radius: 3px;
+        margin-top: 6px;
+        overflow: hidden;
+      }
+      .confidence-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #00d4ff, #00ff88);
+        transition: width 1s cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      #akinator-float-btn {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #00d4ff, #00ff88);
+        border: none;
+        box-shadow: 0 8px 24px rgba(0, 212, 255, 0.4), 0 0 0 2px rgba(255,255,255,0.2) inset;
+        cursor: pointer;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        color: #0a0a0f;
+        transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      #akinator-float-btn:hover {
+        transform: translateY(-4px) scale(1.05);
+        box-shadow: 0 12px 32px rgba(0, 212, 255, 0.6), 0 0 0 2px rgba(255,255,255,0.4) inset;
+      }
+      #akinator-float-btn.hidden {
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(20px) scale(0.8);
+      }
+      @keyframes slideInLeft { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
+      @keyframes slideInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+      @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes zoomIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+      @keyframes pulse-glow { 0% { text-shadow: 0 0 8px rgba(0,212,255,0.4); } 50% { text-shadow: 0 0 16px rgba(0,212,255,0.8); } 100% { text-shadow: 0 0 8px rgba(0,212,255,0.4); } }
     </style>
   </head>
   <body>
@@ -840,6 +1094,11 @@
             <span>Don't save this analysis to history (debug snapshots disabled)</span>
           </label>
 
+          <label class="checkbox premium" style="border-color: rgba(0, 212, 255, 0.4); background: rgba(0, 212, 255, 0.05);">
+            <input type="checkbox" id="enable-akinator" name="enable_akinator" checked />
+            <span>Enable Akinator Interactive Mode <span class="ai-badge">AI Assistant</span></span>
+          </label>
+
           <div class="actions">
             <button type="submit" id="analyze-btn" class="btn-premium">Analyze Water</button>
             <button type="reset" id="reset-btn" class="btn-secondary">Clear</button>
@@ -857,6 +1116,7 @@
         <div class="card-header">
           <h2>Analysis Progress</h2>
           <p class="card-subtitle">Track the analysis pipeline in real-time</p>
+          <p class="card-subtitle" id="analysis-id">No analysis yet</p>
         </div>
         <ol class="timeline premium" id="timeline">
           <li class="timeline-item idle" data-step="extract">
@@ -907,8 +1167,8 @@
         <div class="score-grid premium">
           <div class="score-block premium">
             <p class="label">Water Quality Score</p>
-            <p class="score" id="final-score">--</p>
-            <span class="band premium" id="quality-band">Calculating...</span>
+            <p class="score" id="potability-score">--</p>
+            <span class="band premium" id="band-label">Calculating...</span>
           </div>
           <div class="score-block premium">
             <p class="label">Confidence</p>
@@ -917,23 +1177,26 @@
           </div>
         </div>
 
-        <div class="components" id="score-components">
+        <div class="components" id="component-breakdown">
           <p class="component-title" style="margin: 16px 0 8px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(255,255,255,0.4);">Score Components</p>
         </div>
 
-        <div class="secondary-grid" id="secondary-info">
+        <div class="secondary-grid" id="secondary-metrics">
           <!-- Dynamic content -->
         </div>
 
         <div class="user-analysis premium hidden" id="user-analysis">
           <h3>User Analysis</h3>
-          <p class="conclusion" id="user-conclusion"></p>
-          <p class="rationale" id="user-rationale"></p>
+          <p class="conclusion" id="user-analysis-conclusion"></p>
+          <p class="muted" id="user-analysis-score"></p>
+          <p class="muted" id="user-analysis-confidence"></p>
+          <p class="muted hidden" id="user-analysis-model"></p>
+          <p class="rationale hidden" id="user-analysis-rationale"></p>
         </div>
 
         <div class="external premium" id="external-links" style="margin-top: 20px;">
           <strong>Learn more:</strong>
-          <span id="external-content"></span>
+          <span id="external-data"></span>
         </div>
       </section>
 
@@ -944,26 +1207,42 @@
           <p class="card-subtitle">Detailed analysis artifacts</p>
         </div>
         <div class="debug-actions" style="display: flex; gap: 12px; flex-wrap: wrap;">
-          <button class="btn-secondary" id="download-log">Download Log</button>
-          <button class="btn-secondary" id="view-snapshots">View Snapshots</button>
+          <a class="btn-secondary" id="download-debug" href="#" aria-disabled="true">Download Debug JSON</a>
+          <a class="btn-secondary" id="open-result-json" href="#" aria-disabled="true">Open Result JSON</a>
         </div>
         <pre class="debug-log" id="debug-log" style="margin-top: 16px; overflow-x: auto; font-size: 0.8rem;"></pre>
-        <div class="gallery-grid premium" id="debug-gallery"></div>
+        <div class="debug-snapshots" id="debug-snapshots">
+          <p id="debug-snapshots-empty">No detection snapshots generated yet.</p>
+          <div class="gallery-grid premium" id="snapshot-groups"></div>
+        </div>
       </section>
 
       <!-- History Section -->
-      <section class="card history-card premium full-width">
+      <section class="card history-card premium full-width" id="history-card">
         <div class="card-header">
           <h2>Recent Analyses</h2>
           <p class="card-subtitle">Your analysis history</p>
+          <button type="button" id="refresh-history" class="btn-secondary" style="margin-top: 8px;">Refresh</button>
         </div>
         <div class="history-list" id="history-list">
-          <p class="history-empty" style="color: rgba(255,255,255,0.4); text-align: center; padding: 24px;">
+          <p class="history-empty" id="history-empty" style="color: rgba(255,255,255,0.4); text-align: center; padding: 24px;">
             No analysis history yet. Upload media to get started.
           </p>
         </div>
       </section>
     </main>
+
+    <!-- Akinator UI Overlay -->
+    <div id="akinator-chat" class="hidden">
+      <div id="akinator-header">
+        <h3 class="akinator-title">AI Assistant</h3>
+        <button id="akinator-toggle-btn">v</button>
+      </div>
+      <div id="akinator-body">
+        <div class="akinator-status">Ready to analyze. Upload media to begin.</div>
+      </div>
+    </div>
+    <button id="akinator-float-btn" class="hidden">✨</button>
 
     <script src="/static/js/ui.js"></script>
   </body>

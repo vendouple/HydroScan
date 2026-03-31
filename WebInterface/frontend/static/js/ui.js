@@ -841,6 +841,7 @@ const handleSubmit = async (event) => {
   }
 
   const debugEnabled = debugInput.checked;
+  const akinatorEnabled = document.getElementById("enable-akinator")?.checked;
   setFormEnabled(false);
   toggleAnalysisMode(true);
   startLiveTimeline();
@@ -900,7 +901,10 @@ const handleSubmit = async (event) => {
     }
 
     // Start Akinator session with visual context
-    if (akinatorController && akinatorController.isActive) {
+    if (akinatorController && akinatorEnabled) {
+      if (!akinatorController.isActive) {
+        akinatorController.show();
+      }
       const visualContext = {
         scores: resultData.scores || payload.scores,
         scene: resultData.scene || payload.scene,
@@ -908,6 +912,8 @@ const handleSubmit = async (event) => {
         potability: resultData.potability || payload.potability,
       };
       akinatorController.startSession(visualContext, analysisId);
+    } else if (akinatorController) {
+      akinatorController.hide();
     }
   } catch (error) {
     console.error(error);
@@ -973,6 +979,10 @@ const handleLocate = () => {
 
 // History management
 const loadHistory = async () => {
+  if (!historyListEl) {
+    return;
+  }
+
   try {
     const response = await fetch("/api/history");
     if (!response.ok) {
@@ -983,20 +993,30 @@ const loadHistory = async () => {
     renderHistory(data.analyses || []);
   } catch (error) {
     console.error("Failed to load history:", error);
-    historyEmptyEl.textContent = "Failed to load history. Please try again.";
-    historyEmptyEl.classList.remove("hidden");
+    if (historyEmptyEl) {
+      historyEmptyEl.textContent = "Failed to load history. Please try again.";
+      historyEmptyEl.classList.remove("hidden");
+    }
     historyListEl.classList.add("hidden");
   }
 };
 
 const renderHistory = (analyses) => {
+  if (!historyListEl) {
+    return;
+  }
+
   if (!analyses || analyses.length === 0) {
-    historyEmptyEl.classList.remove("hidden");
+    if (historyEmptyEl) {
+      historyEmptyEl.classList.remove("hidden");
+    }
     historyListEl.classList.add("hidden");
     return;
   }
 
-  historyEmptyEl.classList.add("hidden");
+  if (historyEmptyEl) {
+    historyEmptyEl.classList.add("hidden");
+  }
   historyListEl.classList.remove("hidden");
 
   historyListEl.innerHTML = "";
@@ -1094,7 +1114,7 @@ const loadAnalysis = async (analysisId) => {
 
     // If debug data is available, show it
     if (result.debug) {
-      renderDebug(result.debug);
+      renderDebug(result, analysisId, result.debug.detection_images || []);
     }
 
     // Update analysis ID display

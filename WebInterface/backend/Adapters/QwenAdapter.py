@@ -187,11 +187,12 @@ DETECTION CONTEXT (from image analysis):
         base_prompt += """
 
 QUESTIONING RULES:
-1. Ask ONE clear, specific question at a time
-2. Questions should be answerable with short sentences (not just yes/no)
-3. Focus on details that help distinguish between Clean, Dirty, or NotWater
-4. Consider the user's description and detection context
-5. After max 10 questions, provide your final assessment
+1. Ask ONE clear, specific question at a time. Do not overwhelm the user.
+2. Ask up to 10 questions targeted at collecting more info such as smell, additional features, roughness of the water, and estimated pH levels.
+3. Use the detection context (such as place365 classifications, objects found) to guide your questions and adjust your confidence.
+4. If the user provides info about smell, pH, or roughness, incorporate that to improve model confidence.
+5. Focus on details that help distinguish between Clean, Dirty, or NotWater.
+6. After max 10 questions, provide your final assessment combining the user's answers and the initial computer vision detection.
 
 QUESTION FORMAT: Just ask the question directly, nothing else."""
 

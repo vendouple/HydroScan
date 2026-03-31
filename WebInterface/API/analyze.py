@@ -158,10 +158,12 @@ def _summarize_classifications(predictions: Sequence[Dict[str, Any]]) -> Dict[st
     return summary
 
 
-def _contains_water_keyword(name: str | None) -> bool:
-    if not name:
+def _contains_water_keyword(name: Any) -> bool:
+    if name is None:
         return False
-    lowered = name.lower()
+    lowered = str(name).lower()
+    if not lowered:
+        return False
     return any(keyword in lowered for keyword in WATER_KEYWORDS)
 
 
@@ -649,7 +651,7 @@ def _analyze_packaging(aggregation: Dict[str, Any]) -> Dict[str, Any]:
                 non_water_brand = name
 
     water_visible = any(
-        "water" in str(det.get("class_name") or "").lower() for det in detections
+        _contains_water_keyword(det.get("class_name")) for det in detections
     )
 
     return {
@@ -1641,7 +1643,7 @@ async def analyze_endpoint(
             water_detected = water_detected or any(
                 _contains_water_keyword(pred.get("class_name") or pred.get("class"))
                 or "water"
-                in (pred.get("class_name") or pred.get("class") or "").lower()
+                in str(pred.get("class_name") or pred.get("class") or "").lower()
                 or pred.get("detection_type")
                 == "classification"  # YOLOv11 water quality classification counts as water detection
                 for pred in custom_model_predictions

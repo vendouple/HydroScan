@@ -67,16 +67,28 @@ def create_app() -> FastAPI:
     def model_lab(request: Request):
         return templates.TemplateResponse("model-lab.html", {"request": request})
 
-    try:
-        from WebInterface.API import analyze, models, results, model_test, akinator  # noqa: F401
+    # Include core API routers independently so optional feature failures do not
+    # disable the entire API surface.
+    core_routers = (
+        ("analyze", "/api"),
+        ("results", "/api"),
+        ("models", "/api"),
+        ("model_test", "/api"),
+    )
+    for module_name, prefix in core_routers:
+        try:
+            module = __import__(f"WebInterface.API.{module_name}", fromlist=["router"])
+            app.include_router(module.router, prefix=prefix)
+        except Exception as e:
+            print(f"[HydroScan] Failed to include router '{module_name}': {e}")
 
-        app.include_router(analyze.router, prefix="/api")
-        app.include_router(results.router, prefix="/api")
-        app.include_router(models.router, prefix="/api")
-        app.include_router(model_test.router, prefix="/api")
-        app.include_router(akinator.router)  # Akinator has its own prefix
+    # Akinator is optional and owns its own route prefix.
+    try:
+        from WebInterface.API import akinator
+
+        app.include_router(akinator.router)
     except Exception as e:
-        print(f"[HydroScan] Router include skipped: {e}")
+        print(f"[HydroScan] Optional akinator router unavailable: {e}")
 
     return app
 

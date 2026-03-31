@@ -13,3 +13,4 @@ history/
 *.pth
 *.env
 *.continue
+/skills
